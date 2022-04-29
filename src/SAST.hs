@@ -9,7 +9,6 @@ import Prettyprinter
 
 type SExpr = (Type, SExpr')
 
-
 data SExpr'
   = SLiteral Int
   | SFlit Double
@@ -37,14 +36,13 @@ instance Pretty SExpr' where
   pretty SNull = "NULL"
   pretty (SBinOp op s1 s2) = pretty (snd s1) <+> pretty op <+> pretty (snd s2)
   pretty (SUnOp op s) = pretty op <> pretty (snd s)
-  pretty (SCall ident params) = pretty ident <> encloseSep lparen rparen comma (map (\s -> pretty (fst s) <+> pretty (snd s) ) params)
+  pretty (SCall ident params) = pretty ident <> encloseSep lparen rparen comma (map (\s -> pretty (fst s) <+> pretty (snd s)) params)
   pretty (SCast ty s) = parens (pretty ty) <> pretty (snd s)
   pretty (LVal lval) = pretty lval
   pretty (SAssign lval s) = pretty lval <+> equals <+> pretty (snd s)
-  pretty (SAddr lval) = "&" <> pretty lval 
+  pretty (SAddr lval) = "&" <> pretty lval
   pretty (SSizeof ty) = parens "sizeof" <> pretty ty
   pretty SNoexpr = mempty
-
 
 data LValue
   = SDeref SExpr
@@ -52,7 +50,7 @@ data LValue
   | SId Text
   deriving (Show, Eq)
 
-instance Pretty LValue where 
+instance Pretty LValue where
   pretty (SDeref s) = "*" <> pretty (snd s)
   pretty (SAccess lval val) = pretty lval <> "[" <> pretty val <> "]"
   pretty (SId ident) = viaShow ident
@@ -66,8 +64,22 @@ data SStatement
   | SWhile SExpr SStatement
   deriving (Show, Eq)
 
-instance Pretty SStatement where 
-  pretty _ = undefined
+instance Pretty SStatement where
+  pretty (SExpr s) = pretty (snd s) <> ";"
+  pretty (SBlock ss) = lbrace <> nest 4 (vsep [pretty s <> semi | s <- ss]) <> rbrace
+  pretty (SReturn s) = "return" <+> pretty (snd s) <> semi
+  pretty (SIf s s1 s2) =
+    "if" <> lparen <> pretty (snd s) <> rparen <+> lbrace
+      <> nest 4 (pretty s1)
+      <> rbrace
+      <> "else" <+> lbrace
+      <> nest 4 (pretty s2)
+      <> rbrace
+  pretty (SDoWhile se s) = undefined
+  pretty (SWhile se s) =
+    "while" <> lparen <> pretty (snd se) <> rparen <> lbrace
+      <> nest 4 (pretty s)
+      <> rbrace
 
 data SFunction = SFunction
   { sty :: Type,
@@ -78,13 +90,13 @@ data SFunction = SFunction
   }
   deriving (Show, Eq)
 
-instance Pretty SFunction where 
-  pretty (SFunction {sty=s}) = undefined
+instance Pretty SFunction where
+  pretty (SFunction {sty = s}) = undefined
 
 data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: [SExpr]} -- list needed for structs
   deriving (Show, Eq)
 
-instance Pretty GlobalVar where 
+instance Pretty GlobalVar where
   pretty g = undefined
 
 type SProgram = ([Struct], [Bind], [GlobalVar], [SFunction])
