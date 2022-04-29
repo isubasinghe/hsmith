@@ -27,33 +27,12 @@ data SExpr'
   | SNoexpr
   deriving (Show, Eq)
 
-instance Pretty SExpr' where
-  pretty (SLiteral val) = pretty val
-  pretty (SFlit val) = pretty val
-  pretty (SStrLit val) = "\"" <> pretty val <> "\""
-  pretty (SCharLit val) = "'" <> pretty (chr val) <> "'"
-  pretty (SBoolLit b) = if b then "1" else "0"
-  pretty SNull = "NULL"
-  pretty (SBinOp op s1 s2) = pretty (snd s1) <+> pretty op <+> pretty (snd s2)
-  pretty (SUnOp op s) = pretty op <> pretty (snd s)
-  pretty (SCall ident params) = pretty ident <> encloseSep lparen rparen comma (map (\s -> pretty (fst s) <+> pretty (snd s)) params)
-  pretty (SCast ty s) = parens (pretty ty) <> pretty (snd s)
-  pretty (LVal lval) = pretty lval
-  pretty (SAssign lval s) = pretty lval <+> equals <+> pretty (snd s)
-  pretty (SAddr lval) = "&" <> pretty lval
-  pretty (SSizeof ty) = parens "sizeof" <> pretty ty
-  pretty SNoexpr = mempty
 
 data LValue
   = SDeref SExpr
   | SAccess LValue Int
   | SId Text
   deriving (Show, Eq)
-
-instance Pretty LValue where
-  pretty (SDeref s) = "*" <> pretty (snd s)
-  pretty (SAccess lval val) = pretty lval <> "[" <> pretty val <> "]"
-  pretty (SId ident) = viaShow ident
 
 data SStatement
   = SExpr SExpr
@@ -64,22 +43,9 @@ data SStatement
   | SWhile SExpr SStatement
   deriving (Show, Eq)
 
-instance Pretty SStatement where
-  pretty (SExpr s) = pretty (snd s) <> ";"
-  pretty (SBlock ss) = lbrace <> nest 4 (vsep [pretty s <> semi | s <- ss]) <> rbrace
-  pretty (SReturn s) = "return" <+> pretty (snd s) <> semi
-  pretty (SIf s s1 s2) =
-    "if" <> lparen <> pretty (snd s) <> rparen <+> lbrace
-      <> nest 4 (pretty s1)
-      <> rbrace
-      <> "else" <+> lbrace
-      <> nest 4 (pretty s2)
-      <> rbrace
-  pretty (SDoWhile se s) = undefined
-  pretty (SWhile se s) =
-    "while" <> lparen <> pretty (snd se) <> rparen <> lbrace
-      <> nest 4 (pretty s)
-      <> rbrace
+exampleSExpr' = SLiteral 10
+exampleSExpr = (TyInt, exampleSExpr')
+exampleStatement = SIf exampleSExpr (SExpr exampleSExpr) (SExpr exampleSExpr)
 
 data SFunction = SFunction
   { sty :: Type,
@@ -126,3 +92,42 @@ data SymbolKind = Var | Func deriving (Show, Eq)
 
 data VarKind = Global | Formal | Local | StructField
   deriving (Show, Eq, Ord)
+
+instance Pretty SExpr' where
+  pretty (SLiteral val) = pretty val
+  pretty (SFlit val) = pretty val
+  pretty (SStrLit val) = "\"" <> pretty val <> "\""
+  pretty (SCharLit val) = "'" <> pretty (chr val) <> "'"
+  pretty (SBoolLit b) = if b then "1" else "0"
+  pretty SNull = "NULL"
+  pretty (SBinOp op s1 s2) = pretty (snd s1) <+> pretty op <+> pretty (snd s2)
+  pretty (SUnOp op s) = pretty op <> pretty (snd s)
+  pretty (SCall ident params) = pretty ident <> encloseSep lparen rparen comma (map (\s -> pretty (fst s) <+> pretty (snd s)) params)
+  pretty (SCast ty s) = parens (pretty ty) <> pretty (snd s)
+  pretty (LVal lval) = pretty lval
+  pretty (SAssign lval s) = pretty lval <+> equals <+> pretty (snd s)
+  pretty (SAddr lval) = "&" <> pretty lval
+  pretty (SSizeof ty) = parens "sizeof" <> pretty ty
+  pretty SNoexpr = mempty
+
+instance Pretty LValue where
+  pretty (SDeref s) = "*" <> pretty (snd s)
+  pretty (SAccess lval val) = pretty lval <> "[" <> pretty val <> "]"
+  pretty (SId ident) = viaShow ident
+
+instance Pretty SStatement where
+  pretty (SExpr s) = pretty (snd s) <> ";"
+  pretty (SBlock ss) = lbrace <> nest 4 (vsep [pretty s <> semi | s <- ss]) <> rbrace
+  pretty (SReturn s) = "return" <+> pretty (snd s) <> semi
+  pretty (SIf s s1 s2) =
+    "if" <> lparen <> pretty (snd s) <> rparen <+> lbrace <> hardline 
+      <> indent 2 (pretty s1) <> hardline
+      <> rbrace <> hardline
+      <> "else" <+> lbrace <> hardline
+      <> indent 2 (pretty s2) <> hardline
+      <> rbrace
+  pretty (SDoWhile se s) = undefined
+  pretty (SWhile se s) =
+    "while" <> lparen <> pretty (snd se) <> rparen <> lbrace
+      <> nest 4 (pretty s)
+      <> rbrace

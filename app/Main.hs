@@ -1,15 +1,13 @@
 module Main where
 
-import Language.C.Data.InputStream
-import Language.C.Data.Position
-import Language.C.Parser
 import Text.Pretty.Simple (pPrint)
 import Synth
 import Control.Monad.State.Lazy
+import SAST
+import Prettyprinter
+import Prettyprinter.Render.Text
 
 main :: IO ()
 main = do 
-  let state = emptyProgramState 
-  (structs, state') <- runStateT synthesizeStructs state
-  print structs
+  putDoc $ pretty exampleStatement
 
