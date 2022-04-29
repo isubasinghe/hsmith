@@ -6,8 +6,11 @@ import Control.Monad.State.Lazy
 import SAST
 import Prettyprinter
 import Prettyprinter.Render.Text
+import qualified Data.Text.Lazy.IO as TIO
 
 main :: IO ()
 main = do 
-  putDoc $ pretty exampleStatement
+  let x = pretty exampleStatement
+  let render = TIO.putStrLn . renderLazy . layoutPretty defaultLayoutOptions
+  render x
 

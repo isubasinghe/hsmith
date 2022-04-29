@@ -9,6 +9,8 @@ import Prettyprinter
 
 type SExpr = (Type, SExpr')
 
+myindent = indent 2
+
 data SExpr'
   = SLiteral Int
   | SFlit Double
@@ -117,17 +119,17 @@ instance Pretty LValue where
 
 instance Pretty SStatement where
   pretty (SExpr s) = pretty (snd s) <> ";"
-  pretty (SBlock ss) = lbrace <> nest 4 (vsep [pretty s <> semi | s <- ss]) <> rbrace
+  pretty (SBlock ss) = lbrace <> myindent (vsep [pretty s <> semi | s <- ss]) <> rbrace
   pretty (SReturn s) = "return" <+> pretty (snd s) <> semi
   pretty (SIf s s1 s2) =
     "if" <> lparen <> pretty (snd s) <> rparen <+> lbrace <> hardline 
-      <> indent 2 (pretty s1) <> hardline
+      <>  myindent (pretty s1) <> hardline
       <> rbrace <> hardline
       <> "else" <+> lbrace <> hardline
-      <> indent 2 (pretty s2) <> hardline
+      <> myindent (pretty s2) <> hardline
       <> rbrace
   pretty (SDoWhile se s) = undefined
   pretty (SWhile se s) =
     "while" <> lparen <> pretty (snd se) <> rparen <> lbrace
-      <> nest 4 (pretty s)
+      <> myindent (pretty s)
       <> rbrace
