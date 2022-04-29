@@ -30,6 +30,7 @@ dependencies:
 - MonadRandom == 0.5.3
 - random == 1.2.1
 - lens == 5.0.1
+- prettyprinter == 1.7.1
 
 library:
   source-dirs: src

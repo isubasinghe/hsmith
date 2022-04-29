@@ -1,7 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
 module AST where
 
 import Data.Char (chr)
 import Data.Text (Text)
+import qualified Data.Text as T
+import Prettyprinter 
 
 data Op
   = Add
@@ -21,10 +24,31 @@ data Op
   | BitOr
   deriving (Show, Eq)
 
+instance Pretty Op where 
+  pretty Add = "+"
+  pretty Sub = "-"
+  pretty Mult = "*" 
+  pretty Div = "/"
+  pretty Power = "**"
+  pretty Equal = "=="
+  pretty Neq = "!="
+  pretty Less = "<"
+  pretty Leq = "<="
+  pretty Greater = ">"
+  pretty Geq = ">="
+  pretty And = "&&"
+  pretty Or = "||"
+  pretty BitAnd = "&"
+  pretty BitOr = "|"
+
 data Uop
   = Neg
   | Not
   deriving (Show, Eq)
+
+instance Pretty Uop where 
+  pretty Neg = "-"
+  pretty Not = "!"
 
 data Expr
   = Literal Int
@@ -64,6 +88,15 @@ data Type
   | TyVoid
   | TyStruct Text
   deriving (Show, Eq)
+
+instance Pretty Type where 
+  pretty (Pointer ty) = pretty ty <+> "*"
+  pretty TyInt = "int"
+  pretty TyBool = "char" 
+  pretty TyChar = "char"
+  pretty TyFloat = "float"
+  pretty TyVoid = "void"
+  pretty (TyStruct ident) = "struct" <+> viaShow ident
 
 data Bind = Bind {bindType :: Type, bindName :: Text}
   deriving (Show, Eq)

@@ -1,8 +1,14 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module SAST where
-import Data.Text (Text)
+
 import AST
+import Data.Char (chr)
+import Data.Text (Text)
+import Prettyprinter
 
 type SExpr = (Type, SExpr')
+
 
 data SExpr'
   = SLiteral Int
@@ -22,11 +28,34 @@ data SExpr'
   | SNoexpr
   deriving (Show, Eq)
 
+instance Pretty SExpr' where
+  pretty (SLiteral val) = pretty val
+  pretty (SFlit val) = pretty val
+  pretty (SStrLit val) = "\"" <> pretty val <> "\""
+  pretty (SCharLit val) = "'" <> pretty (chr val) <> "'"
+  pretty (SBoolLit b) = if b then "1" else "0"
+  pretty SNull = "NULL"
+  pretty (SBinOp op s1 s2) = pretty (snd s1) <+> pretty op <+> pretty (snd s2)
+  pretty (SUnOp op s) = pretty op <> pretty (snd s)
+  pretty (SCall ident params) = pretty ident <> encloseSep lparen rparen comma (map (\s -> pretty (fst s) <+> pretty (snd s) ) params)
+  pretty (SCast ty s) = parens (pretty ty) <> pretty (snd s)
+  pretty (LVal lval) = pretty lval
+  pretty (SAssign lval s) = pretty lval <+> equals <+> pretty (snd s)
+  pretty (SAddr lval) = "&" <> pretty lval 
+  pretty (SSizeof ty) = parens "sizeof" <> pretty ty
+  pretty SNoexpr = mempty
+
+
 data LValue
   = SDeref SExpr
   | SAccess LValue Int
   | SId Text
   deriving (Show, Eq)
+
+instance Pretty LValue where 
+  pretty (SDeref s) = "*" <> pretty (snd s)
+  pretty (SAccess lval val) = pretty lval <> "[" <> pretty val <> "]"
+  pretty (SId ident) = viaShow ident
 
 data SStatement
   = SExpr SExpr
@@ -34,7 +63,11 @@ data SStatement
   | SReturn SExpr
   | SIf SExpr SStatement SStatement
   | SDoWhile SExpr SStatement
+  | SWhile SExpr SStatement
   deriving (Show, Eq)
+
+instance Pretty SStatement where 
+  pretty _ = undefined
 
 data SFunction = SFunction
   { sty :: Type,
@@ -45,8 +78,14 @@ data SFunction = SFunction
   }
   deriving (Show, Eq)
 
+instance Pretty SFunction where 
+  pretty (SFunction {sty=s}) = undefined
+
 data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: [SExpr]} -- list needed for structs
   deriving (Show, Eq)
+
+instance Pretty GlobalVar where 
+  pretty g = undefined
 
 type SProgram = ([Struct], [Bind], [GlobalVar], [SFunction])
 

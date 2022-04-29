@@ -207,7 +207,7 @@ synthesizeConstant ty = case ty of
   A.TyStruct ident -> do
     st <- get
     let s = st ^. structs
-    let struct = fromMaybe undefined (M.lookup ident s) -- undefined is safe here always
+    let struct = fromMaybe undefined (M.lookup ident s) -- undefined is safe here always, if we get a A.TyStruct that struct must have been inserted
     tys <- traverse (synthesizeConstant . A.bindType) $ A.structFields struct
     pure $ concat tys
 
@@ -240,3 +240,11 @@ synthesizeFunction = do
   locals <- synthesizeFields
   let newBlockContext = BlockContext { _fnreturn = ty, _fnvariables = M.empty, _fndefinedVariables = M.empty }
   undefined
+
+
+synthesizeProgram :: ProgramGenerator S.SProgram 
+synthesizeProgram = do 
+  strcts <- synthesizeStructs
+  vars <- synthesizeGlobalVariables
+  definedVars <- synthesizeGlobalVariablesInitialised
+  pure (strcts, vars, definedVars, [])
