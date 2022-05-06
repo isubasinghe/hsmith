@@ -28,7 +28,6 @@ library
       AST
       Emit
       Lib
-      Printer
       SAST
       Synth
   other-modules:

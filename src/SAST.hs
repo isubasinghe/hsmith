@@ -130,6 +130,6 @@ instance Pretty SStatement where
       <> rbrace
   pretty (SDoWhile se s) = undefined
   pretty (SWhile se s) =
-    "while" <> lparen <> pretty (snd se) <> rparen <> lbrace
+    "while" <> lparen <> pretty (snd se) <> rparen <> space <> lbrace
       <> myindent (pretty s)
       <> rbrace

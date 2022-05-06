@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 -- Synthesizer for ANSI C
@@ -17,45 +16,40 @@ import Emit
 import qualified SAST as S
 import System.Random
 
-type ProgramGenerator = StateT ProgramState IO
+data RandError
+  = InvalidIndex String
+  | NotYetImplemented String
 
-data BlockContext = BlockContext
-  { _fnreturn :: A.Type,
-    _fnvariables :: M.Map Text A.Bind,
-    _fndefinedVariables :: M.Map Text A.Bind
-  }
+instance Show RandError where
+  show (InvalidIndex s) = "An internal program error was encountered, the random integer generated does not match to a valid constructor.\n" ++ s ++ "\n"
+  show (NotYetImplemented s) = "This feature has not yet been implemented.\n" ++ s ++ "\n"
+
+type ProgramGenerator = ExceptT RandError (StateT ProgramState IO)
 
 data ProgramState = ProgramState
   { _functions :: M.Map Text A.Function,
-    _variables :: M.Map Text A.Bind,
-    _definedVariables :: M.Map String S.GlobalVar,
+    _variables :: M.Map (Text, Int) A.Bind,
+    _definedVariables :: M.Map (Text, Int) S.GlobalVar,
     _structs :: M.Map Text A.Struct,
-    _context :: [BlockContext]  -- for when we enter a block statement
+    _contextIndent :: Int
   }
 
 makeLenses ''ProgramState
-makeLenses ''BlockContext
 
+incrementContextIndent :: ProgramState -> ProgramState
+incrementContextIndent = over contextIndent (+ 1)
 
-maybeHead :: [a] -> Maybe a 
-maybeHead [] = Nothing 
-maybeHead (a:as) = Just a 
+decrementContextIndent :: ProgramState -> ProgramState
+decrementContextIndent = over contextIndent (\s -> s - 1)
 
-pop :: [a] -> Maybe a 
-pop = maybeHead
-
-push :: a -> [a] -> [a] 
-push a as = a:as
-
-newBlockContext :: BlockContext -> BlockContext 
-newBlockContext b = b { _fndefinedVariables = M.empty }
-
-emptyProgramState = ProgramState 
-  { _functions = M.empty
-  , _variables = M.empty
-  , _definedVariables = M.empty
-  , _structs = M.empty
-  , _context = [] }
+emptyProgramState =
+  ProgramState
+    { _functions = M.empty,
+      _variables = M.empty,
+      _definedVariables = M.empty,
+      _structs = M.empty,
+      _contextIndent = 0
+    }
 
 -- random Integer between characters
 randInt :: IO Int
@@ -81,8 +75,8 @@ data RandType
 
 randType :: Bool -> Bool -> ProgramGenerator A.Type
 randType avoidVoid avoidRecurse = do
-  let fns = if avoidVoid then stripTy TyVoid tyFns else tyFns
-  let fns' = if avoidRecurse then stripTy Pointer fns else fns
+  let fns = if avoidVoid then filter (== TyVoid) tyFns else tyFns
+  let fns' = if avoidRecurse then filter (== Pointer) fns else fns
   index <- getStdRandom $ randomR (0, length fns' - 1)
   let ty = fns' !! index
   case ty of
@@ -103,9 +97,6 @@ randType avoidVoid avoidRecurse = do
     _ -> pure $ convertTy ty
   where
     tyFns = [Pointer, TyInt, TyChar, TyBool, TyFloat, TyVoid, TyStruct]
-    stripTy :: RandType -> [RandType] -> [RandType]
-    stripTy ty [] = []
-    stripTy ty' (ty : tys) = if ty' == ty then tys else ty : stripTy ty' tys
     convertTy :: RandType -> A.Type
     convertTy rty =
       case rty of
@@ -222,15 +213,35 @@ synthesizeGlobalVariablesInitialised = do
   numGVars <- liftIO randInt
   synthesizeRepeat numGVars synthesizeDefinedGvar
 
-synthesizeStatement :: ProgramGenerator S.SStatement
-synthesizeStatement = do
-  undefined
+synthesizeRestrictedExpression :: A.Type -> ProgramGenerator S.SExpr
+synthesizeRestrictedExpression ty = undefined
 
-synthesizeStatements :: ProgramGenerator [S.SStatement]
-synthesizeStatements = do 
-  st <- get 
-  let fnreturn = maybeHead $ st^.context 
-  undefined
+synthesizeStatement :: A.Type -> ProgramGenerator S.SStatement
+synthesizeStatement ty = do
+  num <- liftIO $ randIntRange (0,5)
+  case num of
+    0 -> do S.SExpr <$> synthesizeExpression
+    1 -> do S.SBlock <$> synthesizeStatements ty
+    2 -> do S.SReturn <$> synthesizeRestrictedExpression ty
+    3 -> do
+      expr <- synthesizeRestrictedExpression A.TyBool
+      b1 <- synthesizeStatements ty
+      b2 <- synthesizeStatements ty
+      pure $ S.SIf expr (S.SBlock b1) (S.SBlock b2)
+    4 -> do
+      expr <- synthesizeRestrictedExpression A.TyBool
+      ss <- synthesizeStatements ty
+      pure $ S.SDoWhile expr (S.SBlock ss)
+    5 -> do
+      expr <- synthesizeRestrictedExpression A.TyBool
+      ss <- synthesizeStatements ty
+      pure $ S.SWhile expr (S.SBlock ss)
+    _ -> throwError $ InvalidIndex $ "synthesizeStatement " ++ show num
+
+synthesizeStatements :: A.Type -> ProgramGenerator [S.SStatement]
+synthesizeStatements ty = do
+  num <- liftIO randInt
+  synthesizeRepeat num (synthesizeStatement ty)
 
 synthesizeFunction :: ProgramGenerator S.SFunction
 synthesizeFunction = do
@@ -238,12 +249,11 @@ synthesizeFunction = do
   ident <- liftIO randIdent
   formals <- synthesizeFields
   locals <- synthesizeFields
-  let newBlockContext = BlockContext { _fnreturn = ty, _fnvariables = M.empty, _fndefinedVariables = M.empty }
-  undefined
+  body <- synthesizeStatements ty
+  pure $ S.SFunction ty ident formals locals (S.SBlock body)
 
-
-synthesizeProgram :: ProgramGenerator S.SProgram 
-synthesizeProgram = do 
+synthesizeProgram :: ProgramGenerator S.SProgram
+synthesizeProgram = do
   strcts <- synthesizeStructs
   vars <- synthesizeGlobalVariables
   definedVars <- synthesizeGlobalVariablesInitialised
