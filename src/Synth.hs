@@ -122,8 +122,20 @@ structsMap :: Lens' ProgramState (M.Map Text A.Struct)
 structsMap func pstate@ProgramState {_structs = s} =
   func s <&> \newS -> pstate {_structs = newS}
 
+
+variablesMap :: Lens' ProgramState (M.Map (Text, Int) A.Bind)
+variablesMap func pstate@ProgramState {_variables = vs} = 
+  func vs <&> \newVs -> pstate {_variables = newVs}
+
+definedVariablesMap :: Lens' ProgramState (M.Map (Text, Int) S.GlobalVar)
+definedVariablesMap func pstate@ProgramState {_definedVariables = dvs} = 
+  func dvs <&> \newdVs -> pstate {_definedVariables = newdVs}
+
 addStruct :: ProgramState -> A.Struct -> ProgramState
 addStruct pstate st = pstate & structsMap %~ M.insert (A.structName st) st
+
+addVars :: ProgramState -> [A.Bind] -> ProgramState 
+addVars pstate vs = pstate & undefined
 
 synthesizeStruct :: ProgramGenerator A.Struct
 synthesizeStruct = do
@@ -260,3 +272,4 @@ synthesizeProgram = do
   num <- liftIO randInt
   fns <- synthesizeRepeat num synthesizeFunction
   pure (strcts, vars, definedVars, fns)
+
