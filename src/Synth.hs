@@ -257,4 +257,6 @@ synthesizeProgram = do
   strcts <- synthesizeStructs
   vars <- synthesizeGlobalVariables
   definedVars <- synthesizeGlobalVariablesInitialised
-  pure (strcts, vars, definedVars, [])
+  num <- liftIO randInt
+  fns <- synthesizeRepeat num synthesizeFunction
+  pure (strcts, vars, definedVars, fns)
