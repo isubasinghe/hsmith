@@ -1,10 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module AST where
 
 import Data.Char (chr)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Prettyprinter 
+import Prettyprinter
 
 data Op
   = Add
@@ -24,10 +25,10 @@ data Op
   | BitOr
   deriving (Show, Eq)
 
-instance Pretty Op where 
+instance Pretty Op where
   pretty Add = "+"
   pretty Sub = "-"
-  pretty Mult = "*" 
+  pretty Mult = "*"
   pretty Div = "/"
   pretty Power = "**"
   pretty Equal = "=="
@@ -46,7 +47,7 @@ data Uop
   | Not
   deriving (Show, Eq)
 
-instance Pretty Uop where 
+instance Pretty Uop where
   pretty Neg = "-"
   pretty Not = "!"
 
@@ -89,10 +90,10 @@ data Type
   | TyStruct Text
   deriving (Show, Eq)
 
-instance Pretty Type where 
+instance Pretty Type where
   pretty (Pointer ty) = pretty ty <+> "*"
   pretty TyInt = "int"
-  pretty TyBool = "char" 
+  pretty TyBool = "char"
   pretty TyChar = "char"
   pretty TyFloat = "float"
   pretty TyVoid = "void"
@@ -101,9 +102,19 @@ instance Pretty Type where
 data Bind = Bind {bindType :: Type, bindName :: Text}
   deriving (Show, Eq)
 
+instance Pretty Bind where
+  pretty Bind {bindType = bty, bindName = bname} = pretty bty <> space <> pretty bname
 
 data Struct = Struct {structName :: Text, structFields :: [Bind]}
   deriving (Show, Eq)
+
+instance Pretty Struct where
+  pretty s@Struct {structName = sname, structFields = fs} =
+    "struct" <> space <> lbrace <> line
+      <> indent 4 (vsep (map (\s -> pretty s <> semi) fs))
+      <> line
+      <> rbrace
+      <> semi
 
 data Function = Function
   { ty :: Type,

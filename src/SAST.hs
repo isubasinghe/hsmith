@@ -65,9 +65,11 @@ data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: [SExpr
   deriving (Show, Eq)
 
 instance Pretty GlobalVar where
-  pretty g = undefined
+  pretty GlobalVar{gbindName=name, gbindType=ty, gexp=expr} = pretty ty <> space <> pretty name <> space <> "=" <> pretty expr
 
-type SProgram = ([Struct], [Bind], [GlobalVar], [SFunction])
+data SProgram = SProgram [Struct] [Bind] [GlobalVar] [SFunction]
+instance Pretty SProgram where 
+  pretty (SProgram ss bs gs fs) = vsep [vsep (map pretty ss), vsep (map(\s -> pretty s <> semi) bs) , vsep (map pretty fs)]
 
 type Name = Text
 

@@ -28,8 +28,8 @@ type ProgramGenerator = ExceptT RandError (StateT ProgramState IO)
 
 data ProgramState = ProgramState
   { _functions :: M.Map Text A.Function,
-    _variables :: M.Map (Text, Int) A.Bind,
-    _definedVariables :: M.Map (Text, Int) S.GlobalVar,
+    _variables :: M.Map Text A.Bind,
+    _definedVariables :: M.Map Text S.GlobalVar,
     _structs :: M.Map Text A.Struct,
     _contextIndent :: Int
   }
@@ -122,20 +122,26 @@ structsMap :: Lens' ProgramState (M.Map Text A.Struct)
 structsMap func pstate@ProgramState {_structs = s} =
   func s <&> \newS -> pstate {_structs = newS}
 
-
-variablesMap :: Lens' ProgramState (M.Map (Text, Int) A.Bind)
-variablesMap func pstate@ProgramState {_variables = vs} = 
+variablesMap :: Lens' ProgramState (M.Map Text A.Bind)
+variablesMap func pstate@ProgramState {_variables = vs} =
   func vs <&> \newVs -> pstate {_variables = newVs}
 
-definedVariablesMap :: Lens' ProgramState (M.Map (Text, Int) S.GlobalVar)
-definedVariablesMap func pstate@ProgramState {_definedVariables = dvs} = 
+definedVariablesMap :: Lens' ProgramState (M.Map Text S.GlobalVar)
+definedVariablesMap func pstate@ProgramState {_definedVariables = dvs} =
   func dvs <&> \newdVs -> pstate {_definedVariables = newdVs}
+
+insertList :: Ord a => [(a, b)] -> M.Map a b -> M.Map a b
+insertList [] m = m
+insertList ((a, b) : abs) m = insertList abs (M.insert a b m)
 
 addStruct :: ProgramState -> A.Struct -> ProgramState
 addStruct pstate st = pstate & structsMap %~ M.insert (A.structName st) st
 
-addVars :: ProgramState -> [A.Bind] -> ProgramState 
-addVars pstate vs = pstate & undefined
+addVars :: ProgramState -> [A.Bind] -> ProgramState
+addVars pstate vs = pstate & variablesMap %~ insertList (map (\b -> (A.bindName b, b)) vs)
+
+addDefinedVariables :: ProgramState -> [S.GlobalVar] -> ProgramState 
+addDefinedVariables pstate dvs = pstate & definedVariablesMap %~ insertList (map (\g -> (S.gbindName g, g)) dvs)
 
 synthesizeStruct :: ProgramGenerator A.Struct
 synthesizeStruct = do
@@ -230,7 +236,7 @@ synthesizeRestrictedExpression ty = undefined
 
 synthesizeStatement :: A.Type -> ProgramGenerator S.SStatement
 synthesizeStatement ty = do
-  num <- liftIO $ randIntRange (0,5)
+  num <- liftIO $ randIntRange (0, 5)
   case num of
     0 -> do S.SExpr <$> synthesizeExpression
     1 -> do S.SBlock <$> synthesizeStatements ty
@@ -268,8 +274,9 @@ synthesizeProgram :: ProgramGenerator S.SProgram
 synthesizeProgram = do
   strcts <- synthesizeStructs
   vars <- synthesizeGlobalVariables
+  modify (`addVars` vars)
   definedVars <- synthesizeGlobalVariablesInitialised
+  modify (`addDefinedVariables` definedVars)
   num <- liftIO randInt
-  fns <- synthesizeRepeat num synthesizeFunction
-  pure (strcts, vars, definedVars, fns)
-
+  -- fns <- synthesizeRepeat num synthesizeFunction
+  pure $ S.SProgram strcts vars definedVars []
