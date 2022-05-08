@@ -8,22 +8,26 @@ import Control.Lens
 import Control.Monad.Except
 import Control.Monad.Random
 import Control.Monad.State.Lazy
-import GHC.Int
 import qualified Data.Map.Lazy as M
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Emit
+import GHC.Int
 import qualified SAST as S
 import System.Random
 
 data RandError
   = InvalidIndex String
   | NotYetImplemented String
+  | InvalidArgument String
+  | MissingData String
 
 instance Show RandError where
   show (InvalidIndex s) = "An internal program error was encountered, the random integer generated does not match to a valid constructor.\n" ++ s ++ "\n"
   show (NotYetImplemented s) = "This feature has not yet been implemented.\n" ++ s ++ "\n"
+  show (InvalidArgument s) = "The supplied argument was invalid.\n" ++ s ++ "\n"
+  show (MissingData s) = "This is typically a generator error. Data was missing when it was supposed to be present.\n" ++ s ++ "\n"
 
 type ProgramGenerator = ExceptT RandError (StateT ProgramState IO)
 
@@ -81,9 +85,7 @@ randType avoidVoid avoidRecurse = do
   index <- getStdRandom $ randomR (0, length fns' - 1)
   let ty = fns' !! index
   case ty of
-    Pointer -> do
-      pty <- randType False True
-      pure $ A.Pointer pty
+    Pointer -> A.Pointer <$> randType False True
     TyStruct -> do
       s <- get
       let ss = s ^. structs
@@ -95,18 +97,13 @@ randType avoidVoid avoidRecurse = do
           mindex <- getStdRandom $ randomR (0, length l - 1)
           let val = fst $ l !! mindex
           pure $ A.TyStruct val
-    _ -> pure $ convertTy ty
+    TyInt -> pure A.TyInt
+    TyChar -> pure A.TyChar 
+    TyBool -> pure A.TyBool 
+    TyFloat -> pure A.TyFloat 
+    TyVoid -> pure A.TyVoid
   where
     tyFns = [Pointer, TyInt, TyChar, TyBool, TyFloat, TyVoid, TyStruct]
-    convertTy :: RandType -> A.Type
-    convertTy rty =
-      case rty of
-        TyInt -> A.TyInt
-        TyChar -> A.TyChar
-        TyBool -> A.TyBool
-        TyFloat -> A.TyFloat
-        TyVoid -> A.TyVoid
-        _ -> undefined --- already handled by above code
 
 synthesizeField :: ProgramGenerator A.Bind
 synthesizeField = do
@@ -141,7 +138,10 @@ addStruct pstate st = pstate & structsMap %~ M.insert (A.structName st) st
 addVars :: ProgramState -> [A.Bind] -> ProgramState
 addVars pstate vs = pstate & variablesMap %~ insertList (map (\b -> (A.bindName b, b)) vs)
 
-addDefinedVariables :: ProgramState -> [S.GlobalVar] -> ProgramState 
+addVar :: ProgramState -> A.Bind -> ProgramState 
+addVar pstate v = pstate & variablesMap %~ M.insert (A.bindName v) v
+
+addDefinedVariables :: ProgramState -> [S.GlobalVar] -> ProgramState
 addDefinedVariables pstate dvs = pstate & definedVariablesMap %~ insertList (map (\g -> (S.gbindName g, g)) dvs)
 
 synthesizeStruct :: ProgramGenerator A.Struct
@@ -166,14 +166,12 @@ synthesizeRepeat cnt fn = do
   pure (v : others)
 
 synthesizeGlobalVariable :: ProgramGenerator A.Bind
-synthesizeGlobalVariable = do
-  bind <- synthesizeField
-  undefined
+synthesizeGlobalVariable = synthesizeField
 
 synthesizeGlobalVariables :: ProgramGenerator [A.Bind]
 synthesizeGlobalVariables = do
   numGVars <- liftIO randInt
-  synthesizeRepeat numGVars synthesizeField
+  synthesizeRepeat numGVars synthesizeGlobalVariable
 
 synthesizeExpression :: ProgramGenerator S.SExpr
 synthesizeExpression = undefined
@@ -219,9 +217,9 @@ synthesizeConstant ty = case ty of
   A.TyStruct ident -> do
     st <- get
     let s = st ^. structs
-    let struct = fromMaybe undefined (M.lookup ident s) -- undefined is safe here always, if we get a A.TyStruct that struct must have been inserted
-    tys <- traverse (synthesizeConstant . A.bindType) $ A.structFields struct
-    pure $ concat tys
+    case (M.lookup ident s) of 
+      Just x -> concat <$> (traverse (synthesizeConstant . A.bindType) $ A.structFields x)
+      Nothing -> throwError $ MissingData ("Expected " ++ T.unpack ident ++ " to be present but it was not")
 
 synthesizeDefinedGvar :: ProgramGenerator S.GlobalVar
 synthesizeDefinedGvar = do
@@ -235,7 +233,24 @@ synthesizeGlobalVariablesInitialised = do
   synthesizeRepeat numGVars synthesizeDefinedGvar
 
 synthesizeRestrictedExpression :: A.Type -> ProgramGenerator S.SExpr
-synthesizeRestrictedExpression ty = undefined
+synthesizeRestrictedExpression ty = case ty of
+  A.TyInt -> undefined
+  A.TyChar -> undefined
+  A.TyFloat -> undefined
+  A.TyBool -> undefined
+  A.TyVoid -> undefined
+  A.TyStruct ident -> undefined
+  A.Pointer ty -> undefined
+
+
+withVariable :: A.Bind -> ProgramGenerator a -> ProgramGenerator a
+withVariable var a = do 
+  modify(`addVar` var)
+  a
+
+withShiftedDefinedVariable :: Text -> ProgramGenerator a -> ProgramGenerator a 
+withShiftedDefinedVariable ident a = undefined
+
 
 synthesizeStatement :: A.Type -> ProgramGenerator S.SStatement
 synthesizeStatement ty = do
@@ -281,5 +296,5 @@ synthesizeProgram = do
   definedVars <- synthesizeGlobalVariablesInitialised
   modify (`addDefinedVariables` definedVars)
   num <- liftIO randInt
-  -- fns <- synthesizeRepeat num synthesizeFunction
+  fns <- synthesizeRepeat num synthesizeFunction
   pure $ S.SProgram strcts vars definedVars []
