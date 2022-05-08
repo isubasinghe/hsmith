@@ -12,7 +12,6 @@ import qualified Data.Map.Lazy as M
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Emit
 import GHC.Int
 import qualified SAST as S
 import System.Random

@@ -26,7 +26,6 @@ source-repository head
 library
   exposed-modules:
       AST
-      Emit
       Lib
       SAST
       Synth
