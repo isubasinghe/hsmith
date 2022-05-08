@@ -97,20 +97,20 @@ instance Pretty Type where
   pretty TyChar = "char"
   pretty TyFloat = "float"
   pretty TyVoid = "void"
-  pretty (TyStruct ident) = "struct" <+> viaShow ident
+  pretty (TyStruct ident) = "struct" <+> pretty (T.unpack ident)
 
 data Bind = Bind {bindType :: Type, bindName :: Text}
   deriving (Show, Eq)
 
 instance Pretty Bind where
-  pretty Bind {bindType = bty, bindName = bname} = pretty bty <> space <> pretty bname
+  pretty Bind {bindType = bty, bindName = bname} = pretty bty <> space <> pretty (T.unpack bname)
 
 data Struct = Struct {structName :: Text, structFields :: [Bind]}
   deriving (Show, Eq)
 
 instance Pretty Struct where
   pretty s@Struct {structName = sname, structFields = fs} =
-    "struct" <> space <> lbrace <> line
+    "struct" <+> pretty (T.unpack sname) <+> lbrace <> line
       <> indent 4 (vsep (map (\s -> pretty s <> semi) fs))
       <> line
       <> rbrace

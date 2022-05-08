@@ -8,6 +8,7 @@ import Control.Lens
 import Control.Monad.Except
 import Control.Monad.Random
 import Control.Monad.State.Lazy
+import GHC.Int
 import qualified Data.Map.Lazy as M
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -71,12 +72,12 @@ data RandType
   | TyFloat
   | TyVoid
   | TyStruct
-  deriving (Eq, Show)
+  deriving (Eq, Show, Enum, Bounded)
 
 randType :: Bool -> Bool -> ProgramGenerator A.Type
 randType avoidVoid avoidRecurse = do
-  let fns = if avoidVoid then filter (== TyVoid) tyFns else tyFns
-  let fns' = if avoidRecurse then filter (== Pointer) fns else fns
+  let fns = if avoidVoid then filter (/= TyVoid) tyFns else tyFns
+  let fns' = if avoidRecurse then filter (/= Pointer) fns else fns
   index <- getStdRandom $ randomR (0, length fns' - 1)
   let ty = fns' !! index
   case ty of
@@ -177,9 +178,11 @@ synthesizeGlobalVariables = do
 synthesizeExpression :: ProgramGenerator S.SExpr
 synthesizeExpression = undefined
 
+synthesizeInt32 :: ProgramGenerator Int32
+synthesizeInt32 = liftIO randomIO
+
 synthesizeInt :: ProgramGenerator Int
-synthesizeInt = do
-  liftIO randomIO
+synthesizeInt = fromIntegral <$> synthesizeInt32
 
 synthesizeBool :: ProgramGenerator Bool
 synthesizeBool = do

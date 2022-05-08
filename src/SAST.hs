@@ -61,15 +61,20 @@ data SFunction = SFunction
 instance Pretty SFunction where
   pretty (SFunction {sty = s}) = undefined
 
-data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: [SExpr]} -- list needed for structs
+data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: [SExpr]} 
   deriving (Show, Eq)
 
 instance Pretty GlobalVar where
-  pretty GlobalVar{gbindName=name, gbindType=ty, gexp=expr} = pretty ty <> space <> pretty name <> space <> "=" <> pretty expr
+  pretty GlobalVar{gbindName=name, gbindType=ty, gexp=expr} = case ty of 
+                                                                (TyStruct _) -> pretty ty <> space <> pretty name  <+> "="  <+> lbrace <> line
+                                                                  <> indent 4 (vsep (punctuate comma (map (pretty . snd) expr))) <> line
+                                                                  <> rbrace <> semi
+                                                                _ -> pretty ty <> space <> pretty name <> space <> "=" <> pretty (snd $ head expr) <> semi
+                                                                
 
 data SProgram = SProgram [Struct] [Bind] [GlobalVar] [SFunction]
 instance Pretty SProgram where 
-  pretty (SProgram ss bs gs fs) = vsep [vsep (map pretty ss), vsep (map(\s -> pretty s <> semi) bs) , vsep (map pretty fs)]
+  pretty (SProgram ss bs gs fs) = vsep [vsep (map pretty ss), vsep (map(\s -> pretty s <> semi) bs) , vsep (map pretty gs), vsep (map pretty fs)]
 
 type Name = Text
 
