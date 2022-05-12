@@ -173,7 +173,65 @@ synthesizeGlobalVariables = do
   synthesizeRepeat numGVars synthesizeGlobalVariable
 
 synthesizeExpression :: ProgramGenerator S.SExpr
-synthesizeExpression = undefined
+synthesizeExpression = do 
+  index <- liftIO $ randIntRange (0,1)
+  case index of 
+    0 -> (\s -> (A.TyInt,  S.SLiteral s)) <$> synthesizeInt
+    1 -> (\s -> (A.TyFloat, S.SFlit s)) <$> synthesizeFloat
+    2 -> (\s -> (A.Pointer A.TyChar, S.SStrLit s)) <$> liftIO randIdent
+    3 -> (\s -> (A.TyChar, S.SCharLit s)) <$> synthesizeChar
+    4 -> (\s -> (A.TyBool, S.SBoolLit s)) <$> synthesizeBool
+    5 -> pure (A.TyVoid, S.SNull)
+    6 ->  do 
+      opIndex <- liftIO $ randIntRange (0,14)
+      case opIndex of 
+        0 -> undefined 
+        1 -> undefined 
+        2 -> undefined
+        3 -> undefined 
+        4 -> undefined 
+        5 -> undefined 
+        6 -> undefined 
+        7 -> undefined 
+        8 -> undefined 
+        9 -> undefined 
+        10 -> undefined 
+        11 -> undefined 
+        12 -> undefined 
+        13 -> undefined 
+        14 -> undefined
+        _ -> throwError $ InvalidIndex ""
+    7 -> do 
+      opIndex <- liftIO $ randIntRange (0, 1)
+      case opIndex of 
+        0 -> undefined 
+        1 -> undefined 
+        _ -> throwError $ InvalidIndex ""
+    8 -> do 
+      undefined
+    9 -> do 
+      undefined 
+    10 -> do 
+      undefined
+    11 -> do 
+      undefined 
+    12 -> do 
+      undefined 
+    13 -> do 
+      ty <- randType True False
+      pure (ty, S.SSizeof ty)
+    14 -> pure (A.TyVoid, S.SNoexpr)
+    _ -> throwError $ InvalidIndex "synthesizeExpression"
+
+
+synthesizeLVal :: ProgramGenerator S.LValue
+synthesizeLVal = do 
+  index <- liftIO $ randIntRange (0,2)
+  case index of 
+    0 -> undefined 
+    1 -> undefined 
+    2 -> undefined
+    _ -> throwError $ InvalidIndex ""
 
 synthesizeInt32 :: ProgramGenerator Int32
 synthesizeInt32 = liftIO randomIO
@@ -216,8 +274,8 @@ synthesizeConstant ty = case ty of
   A.TyStruct ident -> do
     st <- get
     let s = st ^. structs
-    case (M.lookup ident s) of 
-      Just x -> concat <$> (traverse (synthesizeConstant . A.bindType) $ A.structFields x)
+    case M.lookup ident s of 
+      Just x -> concat <$> traverse (synthesizeConstant . A.bindType) (A.structFields x)
       Nothing -> throwError $ MissingData ("Expected " ++ T.unpack ident ++ " to be present but it was not")
 
 synthesizeDefinedGvar :: ProgramGenerator S.GlobalVar
