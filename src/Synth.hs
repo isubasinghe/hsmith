@@ -57,7 +57,7 @@ emptyProgramState =
 
 -- random Integer between characters
 randInt :: IO Int
-randInt = getStdRandom $ randomR (1, 9)
+randInt = getStdRandom $ randomR (1, 30)
 
 randIntRange :: (Int, Int) -> IO Int
 randIntRange rng = getStdRandom $ randomR rng
@@ -280,13 +280,13 @@ synthesizeExpression = do
     14 -> pure (A.TyVoid, S.SNoexpr)
     _ -> throwError $ InvalidIndex "synthesizeExpression"
 
-synthesizeDerefLVal :: ProgramGenerator S.LValue 
+synthesizeDerefLVal :: ProgramGenerator S.LValue
 synthesizeDerefLVal = do undefined
 
-synthesizeAccessLVal :: ProgramGenerator S.LValue 
+synthesizeAccessLVal :: ProgramGenerator S.LValue
 synthesizeAccessLVal = do undefined
 
-synthesizeIdLVal :: ProgramGenerator S.LValue 
+synthesizeIdLVal :: ProgramGenerator S.LValue
 synthesizeIdLVal = do undefined
 
 synthesizeLVal :: ProgramGenerator S.LValue
@@ -319,8 +319,15 @@ synthesizeFloat = do
 synthesizeConstant :: A.Type -> ProgramGenerator [S.SExpr]
 synthesizeConstant ty = case ty of
   A.Pointer ty' -> do
-    ty' <- randType True True
-    synthesizeConstant ty'
+    s <- get
+    let gvars = s ^. definedVariables
+    let validGVars = filter (\(_, gvar) -> S.gbindType gvar == ty') (M.toList gvars)
+    case length validGVars of 
+      0 -> pure [(A.TyVoid, S.SNull)]
+      _ -> do 
+        index <- liftIO $ randIntRange (0, length validGVars -1)
+        let (ident, _) = validGVars !! index 
+        pure [(A.Pointer ty', S.SAddr (S.SId ident))]
   A.TyInt -> do
     val <- synthesizeInt
     pure [(A.TyInt, S.SLiteral val)]
@@ -405,8 +412,8 @@ synthesizeFunction = do
   ident <- liftIO randIdent
   formals <- synthesizeFields
   locals <- synthesizeFields
-  body <- synthesizeStatements ty
-  pure $ S.SFunction ty ident formals locals (S.SBlock body)
+  -- body <- synthesizeStatements ty
+  pure $ S.SFunction ty ident formals locals (S.SBlock [])
 
 synthesizeProgram :: ProgramGenerator S.SProgram
 synthesizeProgram = do
@@ -417,4 +424,4 @@ synthesizeProgram = do
   modify (`addDefinedVariables` definedVars)
   num <- liftIO randInt
   fns <- synthesizeRepeat num synthesizeFunction
-  pure $ S.SProgram strcts vars definedVars []
+  pure $ S.SProgram strcts vars definedVars fns

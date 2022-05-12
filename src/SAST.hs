@@ -29,7 +29,6 @@ data SExpr'
   | SNoexpr
   deriving (Show, Eq)
 
-
 data LValue
   = SDeref SExpr
   | SAccess LValue Int
@@ -45,10 +44,6 @@ data SStatement
   | SWhile SExpr SStatement
   deriving (Show, Eq)
 
-exampleSExpr' = SLiteral 10
-exampleSExpr = (TyInt, exampleSExpr')
-exampleStatement = SIf exampleSExpr (SExpr exampleSExpr) (SExpr exampleSExpr)
-
 data SFunction = SFunction
   { sty :: Type,
     sname :: Text,
@@ -58,23 +53,31 @@ data SFunction = SFunction
   }
   deriving (Show, Eq)
 
-instance Pretty SFunction where
-  pretty (SFunction {sty = s}) = undefined
+prettyStatements :: [SStatement] -> Doc ann
+prettyStatements ss = vsep (map (\s -> pretty s <> semi) ss)
 
-data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: [SExpr]} 
+instance Pretty SFunction where
+  pretty (SFunction {sty = ty, sname=n, sformals=f, sbody=b}) = 
+    pretty ty <+> pretty n <> lparen <> rparen <+> lbrace <> line <> rbrace
+
+data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: [SExpr]}
   deriving (Show, Eq)
 
 instance Pretty GlobalVar where
-  pretty GlobalVar{gbindName=name, gbindType=ty, gexp=expr} = case ty of 
-                                                                (TyStruct _) -> pretty ty <> space <> pretty name  <+> "="  <+> lbrace <> line
-                                                                  <> indent 4 (vsep (punctuate comma (map (pretty . snd) expr))) <> line
-                                                                  <> rbrace <> semi
-                                                                _ -> pretty ty <> space <> pretty name <> space <> "=" <> pretty (snd $ head expr) <> semi
-                                                                
+  pretty GlobalVar {gbindName = name, gbindType = ty, gexp = expr} = case ty of
+    (TyStruct _) ->
+      pretty ty <> space <> pretty name <+> "=" <+> lbrace <> line
+        <> indent 4 (vsep (punctuate comma (map (pretty . snd) expr)))
+        <> line
+        <> rbrace
+        <> semi
+    _ -> pretty ty <> space <> pretty name <> space <> "=" <> pretty (snd $ head expr) <> semi
 
 data SProgram = SProgram [Struct] [Bind] [GlobalVar] [SFunction]
-instance Pretty SProgram where 
-  pretty (SProgram ss bs gs fs) = vsep [vsep (map pretty ss), vsep (map(\s -> pretty s <> semi) bs) , vsep (map pretty gs), vsep (map pretty fs)]
+
+instance Pretty SProgram where
+  pretty (SProgram ss bs gs fs) = "#include <stdio.h>" <> line <> "#include <stdlib.h>" <> line <> 
+      vsep [vsep (map pretty ss), vsep (map (\s -> pretty s <> semi) bs), vsep (map pretty gs), vsep (map pretty fs)]
 
 type Name = Text
 
@@ -129,11 +132,15 @@ instance Pretty SStatement where
   pretty (SBlock ss) = lbrace <> myindent (vsep [pretty s <> semi | s <- ss]) <> rbrace
   pretty (SReturn s) = "return" <+> pretty (snd s) <> semi
   pretty (SIf s s1 s2) =
-    "if" <> lparen <> pretty (snd s) <> rparen <+> lbrace <> hardline 
-      <>  myindent (pretty s1) <> hardline
-      <> rbrace <> hardline
-      <> "else" <+> lbrace <> hardline
-      <> myindent (pretty s2) <> hardline
+    "if" <> lparen <> pretty (snd s) <> rparen <+> lbrace <> hardline
+      <> myindent (pretty s1)
+      <> hardline
+      <> rbrace
+      <> hardline
+      <> "else" <+> lbrace
+      <> hardline
+      <> myindent (pretty s2)
+      <> hardline
       <> rbrace
   pretty (SDoWhile se s) = undefined
   pretty (SWhile se s) =
