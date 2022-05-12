@@ -125,7 +125,7 @@ instance Pretty SExpr' where
 instance Pretty LValue where
   pretty (SDeref s) = "*" <> pretty (snd s)
   pretty (SAccess lval val) = pretty lval <> "[" <> pretty val <> "]"
-  pretty (SId ident) = viaShow ident
+  pretty (SId ident) = pretty ident
 
 instance Pretty SStatement where
   pretty (SExpr s) = pretty (snd s) <> ";"

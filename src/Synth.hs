@@ -143,6 +143,9 @@ addVar pstate v = pstate & variablesMap %~ M.insert (A.bindName v) v
 addDefinedVariables :: ProgramState -> [S.GlobalVar] -> ProgramState
 addDefinedVariables pstate dvs = pstate & definedVariablesMap %~ insertList (map (\g -> (S.gbindName g, g)) dvs)
 
+addDefinedVariable :: ProgramState -> S.GlobalVar -> ProgramState 
+addDefinedVariable pstate dv = pstate & definedVariablesMap %~ M.insert (S.gbindName dv) dv
+
 synthesizeStruct :: ProgramGenerator A.Struct
 synthesizeStruct = do
   numFields <- liftIO randInt
@@ -310,7 +313,7 @@ synthesizeBool = do
 
 synthesizeChar :: ProgramGenerator Int
 synthesizeChar = do
-  liftIO $ randIntRange (0, 255)
+  liftIO $ randIntRange (0, 127)
 
 synthesizeFloat :: ProgramGenerator Double
 synthesizeFloat = do
@@ -354,8 +357,9 @@ synthesizeDefinedGvar :: ProgramGenerator S.GlobalVar
 synthesizeDefinedGvar = do
   field <- synthesizeField
   expr <- synthesizeConstant (A.bindType field)
-  pure S.GlobalVar {S.gbindType = A.bindType field, S.gbindName = A.bindName field, S.gexp = expr}
-
+  let gvar = S.GlobalVar {S.gbindType = A.bindType field, S.gbindName = A.bindName field, S.gexp = expr}
+  modify(`addDefinedVariable` gvar)
+  pure gvar
 synthesizeGlobalVariablesInitialised :: ProgramGenerator [S.GlobalVar]
 synthesizeGlobalVariablesInitialised = do
   numGVars <- liftIO randInt
@@ -421,7 +425,6 @@ synthesizeProgram = do
   vars <- synthesizeGlobalVariables
   modify (`addVars` vars)
   definedVars <- synthesizeGlobalVariablesInitialised
-  modify (`addDefinedVariables` definedVars)
   num <- liftIO randInt
   fns <- synthesizeRepeat num synthesizeFunction
   pure $ S.SProgram strcts vars definedVars fns
