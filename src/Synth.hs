@@ -97,9 +97,9 @@ randType avoidVoid avoidRecurse = do
           let val = fst $ l !! mindex
           pure $ A.TyStruct val
     TyInt -> pure A.TyInt
-    TyChar -> pure A.TyChar 
-    TyBool -> pure A.TyBool 
-    TyFloat -> pure A.TyFloat 
+    TyChar -> pure A.TyChar
+    TyBool -> pure A.TyBool
+    TyFloat -> pure A.TyFloat
     TyVoid -> pure A.TyVoid
   where
     tyFns = [Pointer, TyInt, TyChar, TyBool, TyFloat, TyVoid, TyStruct]
@@ -137,7 +137,7 @@ addStruct pstate st = pstate & structsMap %~ M.insert (A.structName st) st
 addVars :: ProgramState -> [A.Bind] -> ProgramState
 addVars pstate vs = pstate & variablesMap %~ insertList (map (\b -> (A.bindName b, b)) vs)
 
-addVar :: ProgramState -> A.Bind -> ProgramState 
+addVar :: ProgramState -> A.Bind -> ProgramState
 addVar pstate v = pstate & variablesMap %~ M.insert (A.bindName v) v
 
 addDefinedVariables :: ProgramState -> [S.GlobalVar] -> ProgramState
@@ -172,65 +172,130 @@ synthesizeGlobalVariables = do
   numGVars <- liftIO randInt
   synthesizeRepeat numGVars synthesizeGlobalVariable
 
+synthesizeAddExpr :: ProgramGenerator S.SExpr
+synthesizeAddExpr = do undefined
+
+synthesizeSubExpr :: ProgramGenerator S.SExpr
+synthesizeSubExpr = do undefined
+
+synthesizeMultExpr :: ProgramGenerator S.SExpr
+synthesizeMultExpr = do undefined
+
+synthesizeDivExpr :: ProgramGenerator S.SExpr
+synthesizeDivExpr = do undefined
+
+synthesizeEqualExpr :: ProgramGenerator S.SExpr
+synthesizeEqualExpr = do undefined
+
+synthesizeNeqExpr :: ProgramGenerator S.SExpr
+synthesizeNeqExpr = do undefined
+
+synthesizeLessExpr :: ProgramGenerator S.SExpr
+synthesizeLessExpr = do undefined
+
+synthesizeLeqExpr :: ProgramGenerator S.SExpr
+synthesizeLeqExpr = do undefined
+
+synthesizeGreaterExpr :: ProgramGenerator S.SExpr
+synthesizeGreaterExpr = do undefined
+
+synthesizeGeqExpr :: ProgramGenerator S.SExpr
+synthesizeGeqExpr = do undefined
+
+synthesizeAndExpr :: ProgramGenerator S.SExpr
+synthesizeAndExpr = do undefined
+
+synthesizeOrExpr :: ProgramGenerator S.SExpr
+synthesizeOrExpr = do undefined
+
+synthesizeBitAndExpr :: ProgramGenerator S.SExpr
+synthesizeBitAndExpr = do undefined S.SExpr
+
+synthesizeBitOrExpr :: ProgramGenerator S.SExpr
+synthesizeBitOrExpr = do undefined
+
+synthesizeNegExpr :: ProgramGenerator S.SExpr
+synthesizeNegExpr = do undefined
+
+synthesizeNotExpr :: ProgramGenerator S.SExpr
+synthesizeNotExpr = do undefined
+
+synthesizeSCallExpr :: ProgramGenerator S.SExpr
+synthesizeSCallExpr = do undefined
+
+synthesizeSCastExpr :: ProgramGenerator S.SExpr
+synthesizeSCastExpr = do undefined
+
+synthesizeLvalExpr :: ProgramGenerator S.SExpr
+synthesizeLvalExpr = do undefined
+
+synthesizeAssignExpr :: ProgramGenerator S.SExpr
+synthesizeAssignExpr = do undefined
+
+synthesizeAddrExpr :: ProgramGenerator S.SExpr
+synthesizeAddrExpr = do undefined
+
 synthesizeExpression :: ProgramGenerator S.SExpr
-synthesizeExpression = do 
-  index <- liftIO $ randIntRange (0,1)
-  case index of 
-    0 -> (\s -> (A.TyInt,  S.SLiteral s)) <$> synthesizeInt
+synthesizeExpression = do
+  index <- liftIO $ randIntRange (0, 1)
+  case index of
+    0 -> (\s -> (A.TyInt, S.SLiteral s)) <$> synthesizeInt
     1 -> (\s -> (A.TyFloat, S.SFlit s)) <$> synthesizeFloat
     2 -> (\s -> (A.Pointer A.TyChar, S.SStrLit s)) <$> liftIO randIdent
     3 -> (\s -> (A.TyChar, S.SCharLit s)) <$> synthesizeChar
     4 -> (\s -> (A.TyBool, S.SBoolLit s)) <$> synthesizeBool
     5 -> pure (A.TyVoid, S.SNull)
-    6 ->  do 
-      opIndex <- liftIO $ randIntRange (0,14)
-      case opIndex of 
-        0 -> undefined 
-        1 -> undefined 
-        2 -> undefined
-        3 -> undefined 
-        4 -> undefined 
-        5 -> undefined 
-        6 -> undefined 
-        7 -> undefined 
-        8 -> undefined 
-        9 -> undefined 
-        10 -> undefined 
-        11 -> undefined 
-        12 -> undefined 
-        13 -> undefined 
-        14 -> undefined
+    6 -> do
+      opIndex <- liftIO $ randIntRange (0, 13)
+      case opIndex of
+        0 -> synthesizeAddExpr
+        1 -> synthesizeSubExpr
+        2 -> synthesizeMultExpr
+        3 -> synthesizeDivExpr
+        4 -> synthesizeEqualExpr
+        5 -> synthesizeNeqExpr
+        6 -> synthesizeLessExpr
+        7 -> synthesizeLeqExpr
+        8 -> synthesizeGreaterExpr
+        9 -> synthesizeGeqExpr
+        10 -> synthesizeAndExpr
+        11 -> synthesizeOrExpr
+        12 -> synthesizeBitAndExpr
+        13 -> synthesizeBitOrExpr
         _ -> throwError $ InvalidIndex ""
-    7 -> do 
+    7 -> do
       opIndex <- liftIO $ randIntRange (0, 1)
-      case opIndex of 
-        0 -> undefined 
-        1 -> undefined 
+      case opIndex of
+        0 -> synthesizeNegExpr
+        1 -> synthesizeNotExpr
         _ -> throwError $ InvalidIndex ""
-    8 -> do 
-      undefined
-    9 -> do 
-      undefined 
-    10 -> do 
-      undefined
-    11 -> do 
-      undefined 
-    12 -> do 
-      undefined 
-    13 -> do 
+    8 -> synthesizeSCallExpr
+    9 -> synthesizeSCastExpr
+    10 -> synthesizeLvalExpr
+    11 -> synthesizeAssignExpr
+    12 -> synthesizeAddExpr
+    13 -> do
       ty <- randType True False
       pure (ty, S.SSizeof ty)
     14 -> pure (A.TyVoid, S.SNoexpr)
     _ -> throwError $ InvalidIndex "synthesizeExpression"
 
+synthesizeDerefLVal :: ProgramGenerator S.LValue 
+synthesizeDerefLVal = do undefined
+
+synthesizeAccessLVal :: ProgramGenerator S.LValue 
+synthesizeAccessLVal = do undefined
+
+synthesizeIdLVal :: ProgramGenerator S.LValue 
+synthesizeIdLVal = do undefined
 
 synthesizeLVal :: ProgramGenerator S.LValue
-synthesizeLVal = do 
-  index <- liftIO $ randIntRange (0,2)
-  case index of 
-    0 -> undefined 
-    1 -> undefined 
-    2 -> undefined
+synthesizeLVal = do
+  index <- liftIO $ randIntRange (0, 2)
+  case index of
+    0 -> synthesizeDerefLVal
+    1 -> synthesizeAccessLVal
+    2 -> synthesizeAccessLVal
     _ -> throwError $ InvalidIndex ""
 
 synthesizeInt32 :: ProgramGenerator Int32
@@ -274,7 +339,7 @@ synthesizeConstant ty = case ty of
   A.TyStruct ident -> do
     st <- get
     let s = st ^. structs
-    case M.lookup ident s of 
+    case M.lookup ident s of
       Just x -> concat <$> traverse (synthesizeConstant . A.bindType) (A.structFields x)
       Nothing -> throwError $ MissingData ("Expected " ++ T.unpack ident ++ " to be present but it was not")
 
@@ -299,15 +364,13 @@ synthesizeRestrictedExpression ty = case ty of
   A.TyStruct ident -> undefined
   A.Pointer ty -> undefined
 
-
 withVariable :: A.Bind -> ProgramGenerator a -> ProgramGenerator a
-withVariable var a = do 
-  modify(`addVar` var)
+withVariable var a = do
+  modify (`addVar` var)
   a
 
-withShiftedDefinedVariable :: Text -> ProgramGenerator a -> ProgramGenerator a 
+withShiftedDefinedVariable :: Text -> ProgramGenerator a -> ProgramGenerator a
 withShiftedDefinedVariable ident a = undefined
-
 
 synthesizeStatement :: A.Type -> ProgramGenerator S.SStatement
 synthesizeStatement ty = do

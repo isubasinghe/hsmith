@@ -12,7 +12,6 @@ data Op
   | Sub
   | Mult
   | Div
-  | Power
   | Equal
   | Neq
   | Less
@@ -30,7 +29,6 @@ instance Pretty Op where
   pretty Sub = "-"
   pretty Mult = "*"
   pretty Div = "/"
-  pretty Power = "**"
   pretty Equal = "=="
   pretty Neq = "!="
   pretty Less = "<"
