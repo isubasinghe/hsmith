@@ -1,4 +1,6 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 -- Synthesizer for ANSI C
 module Synth where
@@ -22,6 +24,9 @@ data RandError
   | InvalidArgument String
   | MissingData String
   | NoFuns String
+  | NoVariables String
+  | UnknownError String
+  | OtherError String
 
 instance Show RandError where
   show (InvalidIndex s) = "An internal program error was encountered, the random integer generated does not match to a valid constructor.\n" ++ s ++ "\n"
@@ -29,6 +34,9 @@ instance Show RandError where
   show (InvalidArgument s) = "The supplied argument was invalid.\n" ++ s ++ "\n"
   show (MissingData s) = "This is typically a generator error. Data was missing when it was supposed to be present.\n" ++ s ++ "\n"
   show (NoFuns s) = "A decision to generate a function was made, yet no viable candidates exist\n" ++ s ++ "\n"
+  show (UnknownError s) = "Unknown error occurred.\n" ++ s ++ "\n"
+  show (NoVariables s) = "This is typically an internal generator error. No valid variables were found\n" ++ s ++ "\n"
+  show (OtherError s) = s
 
 type ProgramGenerator = ExceptT RandError (StateT ProgramState IO)
 
@@ -126,9 +134,9 @@ variablesMap :: Lens' ProgramState (M.Map Text A.Bind)
 variablesMap func pstate@ProgramState {_variables = vs} =
   func vs <&> \newVs -> pstate {_variables = newVs}
 
-functionsMap :: Lens' ProgramState (M.Map Text S.SFunction) 
-functionsMap func pstate@ProgramState{_functions=fns} = 
-  func fns <&> \newFns -> pstate{_functions=newFns}
+functionsMap :: Lens' ProgramState (M.Map Text S.SFunction)
+functionsMap func pstate@ProgramState {_functions = fns} =
+  func fns <&> \newFns -> pstate {_functions = newFns}
 
 definedVariablesMap :: Lens' ProgramState (M.Map Text S.GlobalVar)
 definedVariablesMap func pstate@ProgramState {_definedVariables = dvs} =
@@ -144,7 +152,7 @@ addStruct pstate st = pstate & structsMap %~ M.insert (A.structName st) st
 addVars :: ProgramState -> [A.Bind] -> ProgramState
 addVars pstate vs = pstate & variablesMap %~ insertList (map (\b -> (A.bindName b, b)) vs)
 
-addFunction :: ProgramState -> S.SFunction -> ProgramState 
+addFunction :: ProgramState -> S.SFunction -> ProgramState
 addFunction pstate fn = pstate & functionsMap %~ M.insert (S.sname fn) fn
 
 addVar :: ProgramState -> A.Bind -> ProgramState
@@ -186,25 +194,66 @@ synthesizeGlobalVariables = do
   synthesizeRepeat numGVars synthesizeGlobalVariable
 
 synthesizeSCallExpr :: ProgramGenerator S.SExpr
-synthesizeSCallExpr = do 
-  s <- get 
-  let fns = s^.functions
-  case M.size fns of 
+synthesizeSCallExpr = do
+  s <- get
+  let fns = s ^. functions
+  case M.size fns of
     0 -> throwError $ NoFuns "synthesizeSCallExpr"
-    _ -> do 
+    _ -> do
       let fns' = M.toList fns
       index <- liftIO $ randIntRange (0, length fns' - 1)
       let (fnName, fn) = fns' !! index
       let rety = S.sty fn
       let btys = map A.bindType (S.sformals fn)
-      exprs <-  mapM synthesizeRestrictedExpression btys
+      exprs <- mapM synthesizeRestrictedExpression btys
       pure (rety, S.SCall fnName exprs)
 
 synthesizeSCastExpr :: ProgramGenerator S.SExpr
-synthesizeSCastExpr = do undefined
+synthesizeSCastExpr = do
+  ty <- randType True True True
+  expr <- synthesizeExpression
+  pure (ty, S.SCast ty expr)
+
+toEitherT :: (Monad m) => Maybe a -> e -> ExceptT e m a
+toEitherT (Just a) e = pure a
+toEitherT Nothing e = throwError e
+
+randElem :: (MonadError e ProgramGenerator) => [a] -> e -> ProgramGenerator a 
+randElem [] e = throwError e
+randElem as _ = do 
+  index <- liftIO $ randIntRange (0, length as - 1) 
+  pure (as !! index)
 
 synthesizeLvalExpr :: ProgramGenerator S.SExpr
-synthesizeLvalExpr = do undefined
+synthesizeLvalExpr = do
+  opIndex <- liftIO $ randIntRange (0, 2)
+  case opIndex of
+    0 -> do
+      s <- get
+      let defVars = s ^. definedVariables
+      let defVars' = M.toList defVars
+      let defVars'' =
+            filter
+              ( \(_, gvar) -> case S.gbindType gvar of
+                  (A.TyStruct _) -> True
+                  _ -> False
+              )
+              defVars'
+      case length defVars'' of
+        0 -> throwError $ NoVariables "synthesizeLvalExpr:defVars''"
+        _ -> do
+          index <- liftIO $ randIntRange (0, length defVars'' - 1)
+          let (_, gvar) = defVars'' !! index
+          let ss = s ^. structs
+          strct <- toEitherT (M.lookup (S.gbindName gvar) ss) (OtherError "Internal generator error:synthesizeLvalExpr:M.lookup")
+          bind <-  randElem(A.structFields  strct) (OtherError "Internal generator error:synthesizeLvalExpr:binds")
+          undefined
+      undefined
+    1 -> do
+      undefined
+    2 -> do
+      undefined
+    _ -> throwError $ InvalidIndex "synthesizeLvalExpr:opIndex"
 
 synthesizeAssignExpr :: ProgramGenerator S.SExpr
 synthesizeAssignExpr = do undefined
@@ -253,8 +302,13 @@ synthesizeExpression = do
         _ -> throwError $ InvalidIndex ""
       expr <- synthesizeRestrictedExpression ty
       pure (ty, S.SUnOp op expr)
-    8 -> catchError synthesizeSCallExpr (\s -> undefined)
-
+    8 ->
+      catchError
+        synthesizeSCallExpr
+        ( \case
+            (NoFuns _) -> synthesizeExpression -- generate a new expression instead
+            _ -> throwError $ UnknownError "synthesizeExpression:catchError"
+        )
     9 -> synthesizeSCastExpr
     10 -> synthesizeLvalExpr
     11 -> synthesizeAssignExpr
@@ -401,7 +455,7 @@ synthesizeFunction = do
   locals <- synthesizeFields
   -- body <- synthesizeStatements ty
   let fn = S.SFunction ty ident formals locals (S.SBlock [])
-  modify(`addFunction` fn)
+  modify (`addFunction` fn)
   pure fn
 
 synthesizeProgram :: ProgramGenerator S.SProgram
