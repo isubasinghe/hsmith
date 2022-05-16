@@ -52,7 +52,7 @@ executable dead-exe
       Paths_dead
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -fbreak-on-exception -Wall -fwrite-ide-info -hiedir=.hie
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       MonadRandom ==0.5.3
     , Stack ==0.4.0

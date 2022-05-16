@@ -99,6 +99,14 @@ instance Pretty Type where
 data Bind = Bind {bindType :: Type, bindName :: Text}
   deriving (Show, Eq)
 
+class Binder a where 
+  getType :: a -> Type 
+  getName :: a -> Text
+
+instance Binder Bind where 
+  getType = bindType 
+  getName = bindName 
+
 instance Pretty Bind where
   pretty Bind {bindType = bty, bindName = bname} = pretty bty <> space <> pretty (T.unpack bname)
 
