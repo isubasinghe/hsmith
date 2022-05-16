@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
-
+{-# OPTIONS_GHC -Wall #-}
 module AST where
 
-import Data.Char (chr)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Prettyprinter
@@ -89,7 +88,7 @@ data Type
   deriving (Show, Eq)
 
 instance Pretty Type where
-  pretty (Pointer ty) = pretty ty <+> "*"
+  pretty (Pointer ty') = pretty ty' <+> "*"
   pretty TyInt = "int"
   pretty TyBool = "char"
   pretty TyChar = "char"
@@ -107,7 +106,7 @@ data Struct = Struct {structName :: Text, structFields :: [Bind]}
   deriving (Show, Eq)
 
 instance Pretty Struct where
-  pretty s@Struct {structName = sname, structFields = fs} =
+  pretty Struct {structName = sname, structFields = fs} =
     "struct" <+> pretty (T.unpack sname) <+> lbrace <> line
       <> indent 4 (vsep (map (\s -> pretty s <> semi) fs))
       <> line

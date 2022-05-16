@@ -1,22 +1,24 @@
+{-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
+
 
 -- Synthesizer for ANSI C
 module Synth where
 
+import Debug.Trace ()
 import qualified AST as A
-import Control.Lens
+import Control.Lens hiding (index,op)
 import Control.Monad.Except
 import Control.Monad.Random
 import Control.Monad.State.Lazy
 import qualified Data.Map.Lazy as M
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Int
 import qualified SAST as S
-import System.Random
 
 data RandError
   = InvalidIndex String
@@ -56,6 +58,7 @@ incrementContextIndent = over contextIndent (+ 1)
 decrementContextIndent :: ProgramState -> ProgramState
 decrementContextIndent = over contextIndent (\s -> s - 1)
 
+emptyProgramState :: ProgramState
 emptyProgramState =
   ProgramState
     { _functions = M.empty,
@@ -67,7 +70,7 @@ emptyProgramState =
 
 -- random Integer between characters
 randInt :: IO Int
-randInt = getStdRandom $ randomR (1, 30)
+randInt = getStdRandom $ randomR (1, 10)
 
 randIntRange :: (Int, Int) -> IO Int
 randIntRange rng = getStdRandom $ randomR rng
@@ -76,6 +79,9 @@ randIdent :: IO Text
 randIdent = do
   ident <- fmap (take 16 . randomRs ('a', 'z')) newStdGen
   pure $ T.pack ident
+
+randBool :: IO Bool
+randBool = randomIO
 
 data RandType
   = Pointer
@@ -90,10 +96,10 @@ data RandType
 randType :: Bool -> Bool -> Bool -> ProgramGenerator A.Type
 randType avoidVoid avoidRecurse avoidStruct = do
   let fns = if avoidVoid then filter (/= TyVoid) tyFns else tyFns
-  let fns = if avoidRecurse then filter (/= Pointer) fns else fns
-  let fns = if avoidRecurse then filter (/= TyStruct) fns else fns
-  index <- getStdRandom $ randomR (0, length fns - 1)
-  let ty = fns !! index
+  let fns' = if avoidRecurse then filter (/= Pointer) fns else fns
+  let fns'' = if avoidRecurse then filter (/= TyStruct) fns' else fns'
+  index <- getStdRandom $ randomR (0, length fns'' - 1)
+  let ty = fns'' !! index
   case ty of
     Pointer -> A.Pointer <$> randType False True False
     TyStruct -> do
@@ -144,7 +150,7 @@ definedVariablesMap func pstate@ProgramState {_definedVariables = dvs} =
 
 insertList :: Ord a => [(a, b)] -> M.Map a b -> M.Map a b
 insertList [] m = m
-insertList ((a, b) : abs) m = insertList abs (M.insert a b m)
+insertList ((a, b) : abVals) m = insertList abVals (M.insert a b m)
 
 addStruct :: ProgramState -> A.Struct -> ProgramState
 addStruct pstate st = pstate & structsMap %~ M.insert (A.structName st) st
@@ -166,7 +172,6 @@ addDefinedVariable pstate dv = pstate & definedVariablesMap %~ M.insert (S.gbind
 
 synthesizeStruct :: ProgramGenerator A.Struct
 synthesizeStruct = do
-  numFields <- liftIO randInt
   structName <- liftIO randIdent
   structFields <- synthesizeFields
   let struct = A.Struct {A.structName = structName, A.structFields = structFields}
@@ -175,11 +180,11 @@ synthesizeStruct = do
 
 synthesizeStructs :: ProgramGenerator [A.Struct]
 synthesizeStructs = do
-  cnt <- liftIO randInt
+  cnt <- liftIO randInt 
   synthesizeRepeat cnt synthesizeStruct
 
 synthesizeRepeat :: Int -> ProgramGenerator a -> ProgramGenerator [a]
-synthesizeRepeat 0 fn = pure []
+synthesizeRepeat 0 _ = pure []
 synthesizeRepeat cnt fn = do
   v <- fn
   others <- synthesizeRepeat (cnt - 1) fn
@@ -215,14 +220,27 @@ synthesizeSCastExpr = do
   pure (ty, S.SCast ty expr)
 
 toEitherT :: (Monad m) => Maybe a -> e -> ExceptT e m a
-toEitherT (Just a) e = pure a
+toEitherT (Just a) _ = pure a
 toEitherT Nothing e = throwError e
 
-randElem :: (MonadError e ProgramGenerator) => [a] -> e -> ProgramGenerator a 
+randElem :: (MonadError e ProgramGenerator) => [a] -> e -> ProgramGenerator a
 randElem [] e = throwError e
-randElem as _ = do 
-  index <- liftIO $ randIntRange (0, length as - 1) 
+randElem as _ = do
+  index <- liftIO $ randIntRange (0, length as - 1)
   pure (as !! index)
+
+-- approximately equal
+(~=) :: A.Type -> A.Type -> Bool
+(~=) (A.TyStruct _) (A.TyStruct _) = True
+(~=) (A.Pointer _) (A.Pointer _) = True
+(~=) lhs rhs = lhs == rhs
+
+tySearch :: (MonadError e ProgramGenerator) => A.Type -> e -> ProgramGenerator S.GlobalVar
+tySearch ty e = do
+  s <- get
+  let tys = map snd $ M.toList $ s ^. definedVariables
+  let tys' = filter (\ty' -> S.gbindType ty' ~= ty) tys
+  randElem tys' e
 
 synthesizeLvalExpr :: ProgramGenerator S.SExpr
 synthesizeLvalExpr = do
@@ -245,14 +263,33 @@ synthesizeLvalExpr = do
           index <- liftIO $ randIntRange (0, length defVars'' - 1)
           let (_, gvar) = defVars'' !! index
           let ss = s ^. structs
-          strct <- toEitherT (M.lookup (S.gbindName gvar) ss) (OtherError "Internal generator error:synthesizeLvalExpr:M.lookup")
-          bind <-  randElem(A.structFields  strct) (OtherError "Internal generator error:synthesizeLvalExpr:binds")
-          undefined
-      undefined
+          (ty, lval) <- accessMember (S.gbindName gvar) ss
+          pure (ty, S.LVal lval)
+          where
+            accessMember :: Text -> M.Map Text A.Struct -> ProgramGenerator (A.Type, S.LValue)
+            accessMember sname ss = do
+              strct <- toEitherT (M.lookup sname ss) (OtherError "")
+              bind <- randElem (A.structFields strct) (OtherError "synthesizeLvalExpr:accessMember:binds")
+              case A.bindType bind of
+                (A.TyStruct _) -> do
+                  shouldDeepen <- liftIO randBool
+                  if shouldDeepen
+                    then do
+                      (ty, child) <- accessMember (A.bindName bind) ss
+                      pure (ty, S.SAccess child sname)
+                    else do
+                      pure (A.bindType bind, S.SAccess (S.SId (A.bindName bind)) sname)
+                _ -> do
+                  pure (A.bindType bind, S.SAccess (S.SId (A.bindName bind)) sname)
     1 -> do
-      undefined
+      -- TyvVoid does nothing here, it is just a place holder
+      gvar <- tySearch (A.Pointer A.TyVoid) (OtherError "synthesizeLvalExpr:3")
+      let ty = S.gbindType gvar
+      synthesizeRestrictedExpression ty
     2 -> do
-      undefined
+      s <- get
+      v <- randElem (map snd $ M.toList $ s ^. definedVariables) (OtherError "synthesizeLvalExpr:2")
+      pure (S.gbindType v, S.LVal $ S.SId (S.gbindName v))
     _ -> throwError $ InvalidIndex "synthesizeLvalExpr:opIndex"
 
 synthesizeAssignExpr :: ProgramGenerator S.SExpr
@@ -319,24 +356,6 @@ synthesizeExpression = do
     14 -> pure (A.TyVoid, S.SNoexpr)
     _ -> throwError $ InvalidIndex "synthesizeExpression"
 
-synthesizeDerefLVal :: ProgramGenerator S.LValue
-synthesizeDerefLVal = do undefined
-
-synthesizeAccessLVal :: ProgramGenerator S.LValue
-synthesizeAccessLVal = do undefined
-
-synthesizeIdLVal :: ProgramGenerator S.LValue
-synthesizeIdLVal = do undefined
-
-synthesizeLVal :: ProgramGenerator S.LValue
-synthesizeLVal = do
-  index <- liftIO $ randIntRange (0, 2)
-  case index of
-    0 -> synthesizeDerefLVal
-    1 -> synthesizeAccessLVal
-    2 -> synthesizeAccessLVal
-    _ -> throwError $ InvalidIndex ""
-
 synthesizeInt32 :: ProgramGenerator Int32
 synthesizeInt32 = liftIO randomIO
 
@@ -355,30 +374,30 @@ synthesizeFloat :: ProgramGenerator Double
 synthesizeFloat = do
   liftIO randomIO
 
-synthesizeConstant :: A.Type -> ProgramGenerator [S.SExpr]
+synthesizeConstant :: A.Type -> ProgramGenerator S.SExpr
 synthesizeConstant ty = case ty of
   A.Pointer ty' -> do
     s <- get
     let gvars = s ^. definedVariables
     let validGVars = filter (\(_, gvar) -> S.gbindType gvar == ty') (M.toList gvars)
     case length validGVars of
-      0 -> pure [(A.TyVoid, S.SNull)]
+      0 -> pure (A.TyVoid, S.SNull)
       _ -> do
         index <- liftIO $ randIntRange (0, length validGVars - 1)
         let (ident, _) = validGVars !! index
-        pure [(A.Pointer ty', S.SAddr (S.SId ident))]
+        pure (A.Pointer ty', S.SAddr (S.SId ident))
   A.TyInt -> do
     val <- synthesizeInt
-    pure [(A.TyInt, S.SLiteral val)]
+    pure (A.TyInt, S.SLiteral val)
   A.TyBool -> do
     val <- synthesizeBool
-    pure [(A.TyBool, S.SBoolLit val)]
+    pure (A.TyBool, S.SBoolLit val)
   A.TyChar -> do
     val <- synthesizeChar
-    pure [(A.TyChar, S.SCharLit val)]
+    pure (A.TyChar, S.SCharLit val)
   A.TyFloat -> do
     val <- synthesizeFloat
-    pure [(A.TyFloat, S.SFlit val)]
+    pure (A.TyFloat, S.SFlit val)
   A.TyVoid -> do
     ty' <- randType True True False
     synthesizeConstant ty'
@@ -386,7 +405,9 @@ synthesizeConstant ty = case ty of
     st <- get
     let s = st ^. structs
     case M.lookup ident s of
-      Just x -> concat <$> traverse (synthesizeConstant . A.bindType) (A.structFields x)
+      Just x -> do
+        m <- traverse (synthesizeConstant . A.bindType) (A.structFields x)
+        pure (A.TyStruct ident, S.SStructLit ident m)
       Nothing -> throwError $ MissingData ("Expected " ++ T.unpack ident ++ " to be present but it was not")
 
 synthesizeDefinedGvar :: ProgramGenerator S.GlobalVar
@@ -402,15 +423,50 @@ synthesizeGlobalVariablesInitialised = do
   numGVars <- liftIO randInt
   synthesizeRepeat numGVars synthesizeDefinedGvar
 
+synthesizeOp :: ProgramGenerator A.Op
+synthesizeOp = do
+  opIndex <- liftIO $ randIntRange (0, 13)
+  case opIndex of
+    0 -> pure A.Add
+    1 -> pure A.Sub
+    2 -> pure A.Mult
+    3 -> pure A.Div
+    4 -> pure A.Equal
+    5 -> pure A.Neq
+    6 -> pure A.Less
+    7 -> pure A.Leq
+    8 -> pure A.Greater
+    9 -> pure A.Geq
+    10 -> pure A.And
+    11 -> pure A.Or
+    12 -> pure A.BitAnd
+    13 -> pure A.BitOr
+    _ -> throwError $ InvalidIndex "synthesizeExpression:opIndex"
+
+synthesizeUOp :: ProgramGenerator A.Uop
+synthesizeUOp = do
+  opIndex <- liftIO $ randIntRange (0, 1)
+  case opIndex of
+    0 -> pure A.Neg
+    1 -> pure A.Not
+    _ -> throwError $ InvalidIndex ""
+
 synthesizeRestrictedExpression :: A.Type -> ProgramGenerator S.SExpr
-synthesizeRestrictedExpression ty = case ty of
-  A.TyInt -> undefined
-  A.TyChar -> undefined
-  A.TyFloat -> undefined
-  A.TyBool -> undefined
-  A.TyVoid -> undefined
-  A.TyStruct ident -> undefined
-  A.Pointer ty -> undefined
+synthesizeRestrictedExpression ty = do
+  genIndex <- liftIO $ randIntRange (0, 3)
+  case (genIndex, ty) of
+    (0, A.TyStruct _) -> synthesizeRestrictedExpression ty -- retry I guess
+    (0, _) -> do
+      lhs <- synthesizeRestrictedExpression ty
+      rhs <- synthesizeRestrictedExpression ty
+      op <- synthesizeOp
+      pure (ty, S.SBinOp op lhs rhs)
+    (1, A.TyStruct _) -> undefined
+    (1, _) -> do
+      op <- synthesizeUOp
+      expr <- synthesizeRestrictedExpression ty
+      pure (ty, S.SUnOp op expr)
+    _ -> throwError $ InvalidIndex ""
 
 withVariable :: A.Bind -> ProgramGenerator a -> ProgramGenerator a
 withVariable var a = do
@@ -418,7 +474,7 @@ withVariable var a = do
   a
 
 withShiftedDefinedVariable :: Text -> ProgramGenerator a -> ProgramGenerator a
-withShiftedDefinedVariable ident a = undefined
+withShiftedDefinedVariable _ _ = undefined
 
 synthesizeStatement :: A.Type -> ProgramGenerator S.SStatement
 synthesizeStatement ty = do

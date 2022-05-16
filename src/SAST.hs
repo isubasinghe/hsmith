@@ -1,14 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wall #-}
 
 module SAST where
 
-import AST
+import AST hiding (ty)
 import Data.Char (chr)
 import Data.Text (Text)
 import Prettyprinter
 
 type SExpr = (Type, SExpr')
 
+myindent :: Doc ann -> Doc ann
 myindent = indent 2
 
 data SExpr'
@@ -17,6 +19,7 @@ data SExpr'
   | SStrLit Text
   | SCharLit Int
   | SBoolLit Bool
+  | SStructLit Text [SExpr]
   | SNull
   | SBinOp Op SExpr SExpr
   | SUnOp Uop SExpr
@@ -30,8 +33,8 @@ data SExpr'
   deriving (Show, Eq)
 
 data LValue
-  = SDeref SExpr
-  | SAccess LValue Int
+  = SDeref SExpr -- deref an expression
+  | SAccess LValue Text -- access a struct member
   | SId Text
   deriving (Show, Eq)
 
@@ -57,27 +60,21 @@ prettyStatements :: [SStatement] -> Doc ann
 prettyStatements ss = vsep (map (\s -> pretty s <> semi) ss)
 
 instance Pretty SFunction where
-  pretty (SFunction {sty = ty, sname=n, sformals=f, sbody=b}) = 
-    pretty ty <+> pretty n <> lparen <> rparen <+> lbrace <> line <> rbrace
+  pretty (SFunction {sty = fty, sname = n, sformals = sfms, slocals = scls, sbody = _}) =
+    pretty fty <+> pretty n <> lparen <> hsep (punctuate comma (map pretty sfms)) <> rparen <+> lbrace <> line <> myindent (vsep (map (\l -> pretty l <> semi) scls)) <> line <> rbrace
 
-data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: [SExpr]}
+data GlobalVar = GlobalVar {gbindType :: Type, gbindName :: Text, gexp :: SExpr}
   deriving (Show, Eq)
 
 instance Pretty GlobalVar where
-  pretty GlobalVar {gbindName = name, gbindType = ty, gexp = expr} = case ty of
-    (TyStruct _) ->
-      pretty ty <> space <> pretty name <+> "=" <+> lbrace <> line
-        <> indent 4 (vsep (punctuate comma (map (pretty . snd) expr)))
-        <> line
-        <> rbrace
-        <> semi
-    _ -> pretty ty <> space <> pretty name <> space <> "=" <> pretty (snd $ head expr) <> semi
+  pretty GlobalVar {gbindName = gname, gbindType = fty, gexp = expr} = pretty fty <+> pretty gname <+> "=" <+> pretty (snd expr) <> semi
 
 data SProgram = SProgram [Struct] [Bind] [GlobalVar] [SFunction]
 
 instance Pretty SProgram where
-  pretty (SProgram ss bs gs fs) = "#include <stdio.h>" <> line <> "#include <stdlib.h>" <> line <> 
-      vsep [vsep (map pretty ss), vsep (map (\s -> pretty s <> semi) bs), vsep (map pretty gs), vsep (map pretty fs)]
+  pretty (SProgram ss bs gs fs) =
+    "#include <stdio.h>" <> line <> "#include <stdlib.h>" <> line <> line
+      <> vsep (punctuate line [vsep (punctuate line (map pretty ss)), vsep (map (\s -> pretty s <> semi) bs), vsep (map pretty gs), vsep (punctuate line (map pretty fs))])
 
 type Name = Text
 
@@ -121,6 +118,7 @@ instance Pretty SExpr' where
   pretty (SAddr lval) = "&" <> pretty lval
   pretty (SSizeof ty) = parens "sizeof" <> pretty ty
   pretty SNoexpr = mempty
+  pretty (SStructLit _ ss) = lbrace <> myindent (vsep (punctuate comma (map (pretty . snd) ss))) <> rbrace
 
 instance Pretty LValue where
   pretty (SDeref s) = "*" <> pretty (snd s)
@@ -142,7 +140,7 @@ instance Pretty SStatement where
       <> myindent (pretty s2)
       <> hardline
       <> rbrace
-  pretty (SDoWhile se s) = undefined
+  pretty (SDoWhile _ _) = undefined
   pretty (SWhile se s) =
     "while" <> lparen <> pretty (snd se) <> rparen <> space <> lbrace
       <> myindent (pretty s)
