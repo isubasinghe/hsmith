@@ -33,7 +33,6 @@ data SExpr'
   | SAssign LValue SExpr
   | SAddr LValue
   | SSizeof Type
-  | SNoexpr
   deriving (Show, Eq)
 
 data LValue
