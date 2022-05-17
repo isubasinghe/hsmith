@@ -1,6 +1,6 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wall #-}
@@ -66,10 +66,9 @@ instance Pretty SFunction where
   pretty (SFunction {sty = fty, sname = n, sformals = sfms, slocals = scls, sbody = _}) =
     pretty fty <+> pretty n <> lparen <> hsep (punctuate comma (map pretty sfms)) <> rparen <+> lbrace <> line <> myindent (vsep (map (\l -> pretty l <> semi) scls)) <> line <> rbrace
 
-
 data VarTy = Init | Unk | UnInit
 
-data Var (n::VarTy) where 
+data Var (n :: VarTy) where
   Initialised :: Bind -> SExpr -> Var 'Init
   UnInitialised :: Bind -> Var 'UnInit
   Unknown :: Bind -> Var 'Unk
@@ -77,36 +76,41 @@ data Var (n::VarTy) where
 varName :: Var n -> Text
 varName (Initialised b _) = bindName b
 varName (UnInitialised b) = bindName b
-varName (Unknown b) = bindName b 
+varName (Unknown b) = bindName b
 
-varType :: Var n -> Type 
+varType :: Var n -> Type
 varType (Initialised b _) = bindType b
 varType (UnInitialised b) = bindType b
 varType (Unknown b) = bindType b
 
 downgradeVar :: Var 'Init -> Var 'Unk
-downgradeVar (Initialised  b _) = Unknown b
+downgradeVar (Initialised b _) = Unknown b
 
 superDowngradeVar :: Var n -> Bind
 superDowngradeVar (Initialised b _) = b
-superDowngradeVar (UnInitialised b) = b 
+superDowngradeVar (UnInitialised b) = b
 superDowngradeVar (Unknown b) = b
-
 
 data SProgram = SProgram [Struct] [Var 'UnInit] [Var 'Init] [SFunction]
 
 instance Pretty SProgram where
   pretty (SProgram ss bs gs fs) =
     "#include <stdio.h>" <> line <> "#include <stdlib.h>" <> line <> line
-      <> vsep (punctuate line [vsep (punctuate line (map pretty ss)), undefined, undefined, vsep (punctuate line (map pretty fs))])
+      <> vsep (punctuate line [vsep (punctuate line (map pretty ss)), mapPrinter bs, mapPrinter gs, vsep (punctuate line (map pretty fs))])
+      where 
+        mapPrinter vs = vsep (punctuate line (map (\v -> pretty v <> semi) vs))
 
 type Name = Text
+
+instance Pretty (Var n) where
+  pretty (Initialised b e) = pretty b <+> "=" <+> pretty (snd e)
+  pretty (Unknown b) = pretty b
+  pretty (UnInitialised b) = pretty b
 
 data BindingLoc = F Function | S Struct | TopLevel
   deriving (Show, Eq)
 
 data BindingKind = Duplicate | Void deriving (Show, Eq)
-
 
 data VarKind = Global | Formal | Local | StructField
   deriving (Show, Eq, Ord)
@@ -126,7 +130,6 @@ instance Pretty SExpr' where
   pretty (SAssign lval s) = pretty lval <+> equals <+> pretty (snd s)
   pretty (SAddr lval) = "&" <> pretty lval
   pretty (SSizeof ty) = parens "sizeof" <> pretty ty
-  pretty SNoexpr = mempty
   pretty (SStructLit _ ss) = lbrace <> myindent (vsep (punctuate comma (map (pretty . snd) ss))) <> rbrace
 
 instance Pretty LValue where

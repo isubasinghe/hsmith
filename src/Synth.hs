@@ -1,9 +1,9 @@
-{-# LANGUAGE BlockArguments #-}
 -- Random program Synthesizer for C
 -- Written by Isitha Subasinghe for ETH Zuerich's Automated Software Testing course
 -- Programming rules
 -- 1) recursion is allowed whenn eventual termination is guaranteed
 -- 2) Prove non-trivial properties with dependent types where possible (See SAST.Var)
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -419,7 +419,7 @@ synthesizeRestrictedExpression :: A.Type -> ProgramGenerator S.SExpr
 synthesizeRestrictedExpression ty = do
   genIndex <- liftIO $ randIntRange (0, 7)
   case (genIndex, ty) of
-    (0, _) -> synthesizeConstant ty 
+    (0, _) -> synthesizeConstant ty
     (1, A.TyStruct _) -> synthesizeRestrictedExpression ty -- retry I guess
     (1, _) -> do
       lhs <- synthesizeRestrictedExpression ty
