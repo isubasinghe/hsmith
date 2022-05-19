@@ -101,7 +101,7 @@ data SProgram = SProgram [Struct] [Var 'UnInit] [Var 'Init] [SFunction]
 
 instance Pretty SProgram where
   pretty (SProgram ss bs gs fs) =
-    "#include <stdio.h>" <> line <> "#include <stdlib.h>" <> line <> line
+    "#include <stdio.h>" <> line <> "#include <stdlib.h>" <> line <> "#undef NULL" <> line <> "#define NULL ((int*)0)" <> line
       <> vsep (punctuate line [vsep (punctuate line (map pretty ss)), mapPrinter bs, mapPrinter gs, vsep (punctuate line (map pretty fs))])
       where 
         mapPrinter vs = vsep (punctuate line (map (\v -> pretty v <> semi) vs))

@@ -374,7 +374,9 @@ runSynthesizers (synth:ss) = do
 
 
 synthesizeDeref :: A.Type -> ProgramGenerator S.LValue 
-synthesizeDeref ty = do undefined
+synthesizeDeref ty = do 
+  expr <- synthesizeRestrictedExpression (A.Pointer ty)
+  pure $ S.SDeref expr
 
 synthesizeAccess :: A.Type -> ProgramGenerator S.LValue 
 synthesizeAccess ty = do undefined 
@@ -434,7 +436,12 @@ synthesizeConstant ty = case ty of
           <$> tySearch ty' (NoVariables "synthesizeConstant:A.Pointer ty'")
       )
       ( \case
-          (NoVariables _) -> pure (A.TyInt, S.SNull)
+          (NoVariables _) -> if ty' /= A.TyInt then do 
+                              -- cast our NULL pointer to ty
+                              let expr = S.SCast ty (A.TyInt, S.SNull)
+                              pure (ty, expr)
+                            else 
+                                pure (ty, S.SNull)
           _ -> throwError $ UnknownError "synthesizeConstant"
       )
   A.TyInt -> do
