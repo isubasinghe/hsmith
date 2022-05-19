@@ -1,7 +1,7 @@
 -- Random program Synthesizer for C
 -- Written by Isitha Subasinghe for ETH Zuerich's Automated Software Testing course
 -- Programming rules
--- 1) recursion is allowed whenn eventual termination is guaranteed
+-- 1) recursion is allowed when eventual termination is guaranteed
 -- 2) Prove non-trivial properties with dependent types where possible (See SAST.Var)
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
@@ -22,8 +22,9 @@ import qualified AST as A
 import Control.Lens hiding (index, op)
 import Control.Monad.Except
 import Control.Monad.Random
-import Control.Monad.State.Lazy
-import qualified Data.Map.Lazy as M
+import Control.Monad.State.Strict
+import Data.Array.IO hiding (newArray, index)
+import qualified Data.Map.Strict as M
 import Data.Text (Text)
 import qualified Data.Text as T
 import Debug.Trace ()
@@ -58,8 +59,10 @@ data ProgramState = ProgramState
     _preInitialisedVars :: M.Map Text (S.Var 'S.Init),
     _initialisedVars :: M.Map Text (S.Var 'S.Unk),
     _structs :: M.Map Text A.Struct,
+    _statements :: [S.SStatement], -- only valid when generating functions
     _contextIndent :: Int
   }
+  deriving (Show)
 
 makeLenses ''ProgramState
 
@@ -77,6 +80,7 @@ emptyProgramState =
       _preInitialisedVars = M.empty,
       _initialisedVars = M.empty,
       _structs = M.empty,
+      _statements = [],
       _contextIndent = 0
     }
 
@@ -157,6 +161,10 @@ functionsMap :: Lens' ProgramState (M.Map Text S.SFunction)
 functionsMap func pstate@ProgramState {_functions = fns} =
   func fns <&> \newFns -> pstate {_functions = newFns}
 
+statementsMap :: Lens' ProgramState [S.SStatement]
+statementsMap func pstate@ProgramState {_statements = ss} =
+  func ss <&> \newSS -> pstate {_statements = newSS}
+
 definedVariablesMap :: Lens' ProgramState (M.Map Text (S.Var 'S.Init))
 definedVariablesMap func pstate@ProgramState {_preInitialisedVars = dvs} =
   func dvs <&> \newdVs -> pstate {_preInitialisedVars = newdVs}
@@ -170,6 +178,12 @@ addStruct pstate st = pstate & structsMap %~ M.insert (A.structName st) st
 
 addVars :: ProgramState -> [S.Var 'S.UnInit] -> ProgramState
 addVars pstate vs = pstate & variablesMap %~ insertList (map (\b -> (S.varName b, b)) vs)
+
+addStatement :: ProgramState -> S.SStatement -> ProgramState
+addStatement pstate s = pstate & statementsMap %~ (++ [s]) -- use a difference list maybe
+
+clearStatements :: ProgramState -> ProgramState
+clearStatements pstate = pstate & statementsMap %~ const []
 
 deleteList :: [Text] -> M.Map Text b -> M.Map Text b
 deleteList xs s = foldl (flip M.delete) s xs
@@ -264,56 +278,130 @@ tySearch ty e = do
   b <- randElem tys' e
   pure $ S.Unknown b
 
-synthesizeLVal :: A.Type -> ProgramGenerator (A.Type, S.LValue)
-synthesizeLVal ty = do
-  opIndex <- liftIO $ randIntRange (0, 2)
+tySearchStructsDFS :: (MonadError e ProgramGenerator) => A.Type -> [([A.Bind], A.Bind)] -> e -> ProgramGenerator [([A.Bind], A.Bind)]
+tySearchStructsDFS ty bs e = do
+  newBS <-
+    concat
+      <$> mapM
+        ( \(path, b) ->
+            if A.bindType b == ty
+              then pure [(path, b)]
+              else do
+                s <- get
+                let strcts = s ^. structs
+                let binds = maybe [] A.structFields (M.lookup (A.bindName b) strcts)
+                let pathsAndBinds = map (path ++ [b],) binds
+                pure pathsAndBinds
+        )
+        bs
+  let shouldRecurse = any (\(_, b) -> A.bindType b /= ty) newBS
+  if shouldRecurse then tySearchStructsDFS ty newBS e else pure newBS
+
+tySearchStruct :: (MonadError e ProgramGenerator) => A.Type -> e -> ProgramGenerator [([A.Bind], A.Bind)]
+tySearchStruct ty e = do
   s <- get
-  case (opIndex, ty) of
-    -- SAccess
-    (0, A.TyStruct _) -> do
-      gvar <- tySearch (A.TyStruct "placeholder") $ OtherError "synthesizeLvalExpr:0:gvar"
-      let ss = s ^. structs
-      (ty', lval) <- accessMember (S.varName gvar) ss
-      pure (ty', lval)
-      where
-        accessMember :: Text -> M.Map Text A.Struct -> ProgramGenerator (A.Type, S.LValue)
-        accessMember sname ss = do
-          strct <- toEitherT (M.lookup sname ss) (OtherError "")
-          bind <- randElem (A.structFields strct) (OtherError "synthesizeLvalExpr:accessMember:binds")
-          case A.bindType bind of
-            (A.TyStruct _) -> do
-              shouldDeepen <- liftIO randBool
-              if shouldDeepen
-                then do
-                  (ty', child) <- accessMember (A.bindName bind) ss
-                  pure (ty', S.SAccess child sname)
-                else do
-                  pure (A.bindType bind, S.SAccess (S.SId (A.bindName bind)) sname)
-            _ -> do
-              pure (A.bindType bind, S.SAccess (S.SId (A.bindName bind)) sname)
-    (1, A.Pointer ty') -> do
-      expr <- synthesizeRestrictedExpression ty
-      pure (ty', S.SDeref expr)
-    (2, _) -> do
-      v <- tySearch ty $ OtherError ""
-      pure (S.varType v, S.SId (S.varName v))
-    _ -> throwError $ InvalidIndex "synthesizeLvalExpr:opIndex"
+  let tys = map (S.superDowngradeVar . snd) $ M.toList $ s ^. preInitialisedVars
+  let otherTys = map (S.superDowngradeVar . snd) $ M.toList $ s ^. initialisedVars
+  let allTys = map ([],) (tys ++ otherTys)
+  tySearchStructsDFS ty allTys e
+
+data Recoverable a = Recoverable (Either RandError (ProgramGenerator ())) (ProgramGenerator a)
+
+runRecoverable :: Recoverable a -> ProgramGenerator a
+runRecoverable (Recoverable erfn fn) = do
+  s <- get
+  let eitherOut = runExceptT fn
+  (perr, s') <- liftIO (runStateT eitherOut s)
+  case perr of
+    Right a -> do
+      put s'
+      pure a
+    Left _ -> do
+      case erfn of
+        Right rfn -> do
+          let eitherOut' = runExceptT rfn
+          (perr', s'') <- liftIO (runStateT eitherOut' s)
+          case perr' of
+            Right _ -> do
+              put s''
+              fn
+            Left e -> do throwError e
+        Left e -> throwError e
+
+synthesizeLocalVariable :: A.Type -> ProgramGenerator ()
+synthesizeLocalVariable ty = do
+  expr <- synthesizeConstant ty
+  ident <- liftIO randIdent
+  modify (`addStatement` S.SDeclAssign ty ident expr)
+  pure ()
+
+data RLVal
+  = GenAccess
+  | GenDeref
+  | GenId
+  deriving (Show, Eq, Bounded, Enum)
+
+randomRLVal :: IO RLVal
+randomRLVal = do
+  toEnum <$> randIntRange (fromEnum (minBound :: RLVal), fromEnum (maxBound :: RLVal))
+
+shuffle :: [a] -> IO [a]
+shuffle xs = do
+  ar <- newArray n xs
+  forM [1 .. n] $ \i -> do
+    j <- randomRIO (i, n)
+    vi <- readArray ar i
+    vj <- readArray ar j
+    writeArray ar j vi
+    return vj
+  where
+    n = length xs
+    newArray :: Int -> [a] -> IO (IOArray Int a)
+    newArray n' = newListArray (1, n')
+
+
+runSynthesizers :: [ProgramGenerator a] -> ProgramGenerator a 
+runSynthesizers [] = throwError $ OtherError ""
+runSynthesizers (synth:ss) = do
+  s <- get
+  let eitherOut = runExceptT synth 
+  (out, s') <- liftIO $ runStateT eitherOut s
+  case out of 
+    Right val -> do
+      put s'
+      pure val 
+    Left _ -> runSynthesizers ss
+
+
+synthesizeDeref :: A.Type -> ProgramGenerator S.LValue 
+synthesizeDeref ty = do undefined
+
+synthesizeAccess :: A.Type -> ProgramGenerator S.LValue 
+synthesizeAccess ty = do undefined 
+
+synthesizeId :: A.Type -> ProgramGenerator S.LValue 
+synthesizeId ty = do undefined
+
+synthesizeLVal :: A.Type -> ProgramGenerator S.LValue
+synthesizeLVal ty = do 
+  shuffledActions <- liftIO $ shuffle [synthesizeDeref ty, synthesizeAccess ty, synthesizeId ty]
+  runSynthesizers shuffledActions 
 
 synthesizeLvalExpr :: A.Type -> ProgramGenerator S.SExpr
 synthesizeLvalExpr ty = do
-  (ty', lval) <- synthesizeLVal ty
-  pure (ty', S.LVal lval)
+  lval <- synthesizeLVal ty
+  pure (ty, S.LVal lval)
 
 synthesizeAssignExpr :: A.Type -> ProgramGenerator S.SExpr
 synthesizeAssignExpr ty = do
   expr <- synthesizeRestrictedExpression ty
-  (ty', lval) <- synthesizeLVal ty
-  pure (ty', S.SAssign lval expr)
+  lval <- synthesizeLVal ty
+  pure (ty, S.SAssign lval expr)
 
 synthesizeAddrExpr :: A.Type -> ProgramGenerator S.SExpr
 synthesizeAddrExpr ty = do
-  (ty', lval) <- synthesizeLVal ty
-  pure (A.Pointer ty', S.SAddr lval)
+  lval <- synthesizeLVal ty
+  pure (A.Pointer ty, S.SAddr lval)
 
 synthesizeExpression :: ProgramGenerator S.SExpr
 synthesizeExpression = do
@@ -413,25 +501,48 @@ synthesizeUOp = do
   case opIndex of
     0 -> pure A.Neg
     1 -> pure A.Not
-    _ -> throwError $ InvalidIndex ""
+    _ -> throwError $ InvalidIndex "synthesizeUOp"
+
+data RExpr
+  = GenConstant
+  | GenBinOp
+  | GenUOp
+  | GenCall
+  | GenCast
+  | GenLVal
+  | GenAssign
+  | GenAddr
+  deriving (Show, Eq, Enum, Bounded)
+
+randRExpr :: IO RExpr
+randRExpr = do
+  toEnum <$> randIntRange (fromEnum (minBound :: RExpr), fromEnum (maxBound :: RExpr))
 
 synthesizeRestrictedExpression :: A.Type -> ProgramGenerator S.SExpr
 synthesizeRestrictedExpression ty = do
-  genIndex <- liftIO $ randIntRange (0, 7)
-  case (genIndex, ty) of
-    (0, _) -> synthesizeConstant ty
-    (1, A.TyStruct _) -> synthesizeRestrictedExpression ty -- retry I guess
-    (1, _) -> do
+  genAction <- liftIO randRExpr
+  case (genAction, ty) of
+    (GenConstant, _) -> do
+      liftIO $ putStrLn "generate constant"
+      synthesizeConstant ty
+    (GenBinOp, _) -> do
+      liftIO $ putStrLn "generate binop"
       lhs <- synthesizeRestrictedExpression ty
       rhs <- synthesizeRestrictedExpression ty
       op <- synthesizeOp
       pure (ty, S.SBinOp op lhs rhs)
-    (2, A.TyStruct _) -> synthesizeRestrictedExpression ty
-    (2, _) -> do
+    (GenUOp, A.TyStruct _) -> do
+      -- recurse because we cannot generate uops for structs
+      liftIO $ putStrLn "generate struct recurse"
+      synthesizeRestrictedExpression ty
+    (GenUOp, _) -> do
+      liftIO $ putStrLn "generate uop"
       op <- synthesizeUOp
       expr <- synthesizeRestrictedExpression ty
       pure (ty, S.SUnOp op expr)
-    (3, _) -> do
+    (GenCall, _) -> do
+      -- call a function
+      liftIO $ putStrLn "generate call"
       s <- get
       let fns = filter (\(_, f) -> S.sty f == ty) $ M.toList $ s ^. functions
       case length fns of
@@ -442,35 +553,64 @@ synthesizeRestrictedExpression ty = do
           let sformals = S.sformals fn
           exprs <- mapM (synthesizeRestrictedExpression . A.bindType) sformals
           pure (ty, S.SCall fnName exprs)
-    (4, _) -> do
+    (GenCast, _) -> do
+      liftIO $ putStrLn "generate cast"
       expr <- synthesizeExpression
       pure (ty, S.SCast ty expr)
-    (5, _) -> do synthesizeLvalExpr ty
-    (6, _) -> do synthesizeAssignExpr ty
-    (7, _) -> do synthesizeAddrExpr ty
-    _ -> throwError $ InvalidIndex ""
+    (GenLVal, _) -> do
+      liftIO $ putStrLn "generate lvalExpr"
+      synthesizeLvalExpr ty
+    (GenAssign, _) -> do
+      liftIO $ putStrLn "generate assign"
+      synthesizeAssignExpr ty
+    (GenAddr, _) -> do
+      liftIO $ putStrLn "generate addr"
+      synthesizeAddrExpr ty
+
+data RStatement
+  = GenExpr
+  | GenBlock
+  | GenReturn
+  | GenIf
+  | GenDoWhile
+  | GenWhile
+  deriving (Show, Eq, Bounded, Enum)
+
+randomRStatement :: IO RStatement
+randomRStatement = do
+  toEnum <$> randIntRange (fromEnum (minBound :: RStatement), fromEnum (maxBound :: RStatement))
 
 synthesizeStatement :: A.Type -> ProgramGenerator S.SStatement
 synthesizeStatement ty = do
-  num <- liftIO $ randIntRange (0, 5)
-  case num of
-    0 -> do S.SExpr <$> synthesizeExpression
-    1 -> do S.SBlock <$> synthesizeStatements ty
-    2 -> do S.SReturn <$> synthesizeRestrictedExpression ty
-    3 -> do
+  genAction <- liftIO randomRStatement
+  s <- case genAction of
+    GenExpr -> do
+      liftIO $ putStrLn "generate S.SExpr"
+      S.SExpr <$> synthesizeExpression
+    GenBlock -> do
+      liftIO $ putStrLn "generate S.SBlock"
+      S.SBlock <$> synthesizeStatements ty
+    GenReturn -> do
+      liftIO $ putStrLn "generate S.SReturn"
+      S.SReturn <$> synthesizeRestrictedExpression ty
+    GenIf -> do
+      liftIO $ putStrLn "generate S.SIf"
       expr <- synthesizeRestrictedExpression A.TyBool
       b1 <- synthesizeStatements ty
       b2 <- synthesizeStatements ty
       pure $ S.SIf expr (S.SBlock b1) (S.SBlock b2)
-    4 -> do
+    GenDoWhile -> do
+      liftIO $ putStrLn "generate S.SDoWhile"
       expr <- synthesizeRestrictedExpression A.TyBool
       ss <- synthesizeStatements ty
       pure $ S.SDoWhile expr (S.SBlock ss)
-    5 -> do
+    GenWhile -> do
+      liftIO $ putStrLn "generate S.SWhile"
       expr <- synthesizeRestrictedExpression A.TyBool
       ss <- synthesizeStatements ty
       pure $ S.SWhile expr (S.SBlock ss)
-    _ -> throwError $ InvalidIndex $ "synthesizeStatement " ++ show num
+  modify (`addStatement` s)
+  pure s
 
 synthesizeStatements :: A.Type -> ProgramGenerator [S.SStatement]
 synthesizeStatements ty = do
@@ -493,9 +633,14 @@ synthesizeFunction = do
   locals <- map S.UnInitialised <$> synthesizeFields
   let locals' = map S.superDowngradeVar locals
   body <- withVariables (formals ++ locals) $ do
-    synthesizeStatements ty
-  let fn = S.SFunction ty ident formals' locals' (S.SBlock body)
+    _ <- synthesizeStatements ty
+    s <- get
+    let stmts = s ^. statements
+    let stmt = S.SBlock stmts
+    pure stmt
+  let fn = S.SFunction ty ident formals' locals' body
   modify (`addFunction` fn)
+  modify clearStatements
   pure fn
 
 synthesizeProgram :: ProgramGenerator S.SProgram

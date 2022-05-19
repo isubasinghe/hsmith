@@ -34,12 +34,15 @@ library
       src
   build-depends:
       MonadRandom ==0.5.3
+    , QuickCheck ==2.14.2
     , Stack ==0.4.0
+    , array ==0.5.4.0
     , base >=4.7 && <5
     , containers ==0.6.5.1
     , language-c ==0.9.1
     , lens ==5.0.1
     , mtl ==2.2.2
+    , parallel ==3.2.2.0
     , pretty-simple ==4.1.0.0
     , prettyprinter ==1.7.1
     , random ==1.2.1
@@ -55,13 +58,16 @@ executable dead-exe
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       MonadRandom ==0.5.3
+    , QuickCheck ==2.14.2
     , Stack ==0.4.0
+    , array ==0.5.4.0
     , base >=4.7 && <5
     , containers ==0.6.5.1
     , dead
     , language-c ==0.9.1
     , lens ==5.0.1
     , mtl ==2.2.2
+    , parallel ==3.2.2.0
     , pretty-simple ==4.1.0.0
     , prettyprinter ==1.7.1
     , random ==1.2.1
@@ -78,13 +84,16 @@ test-suite dead-test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       MonadRandom ==0.5.3
+    , QuickCheck ==2.14.2
     , Stack ==0.4.0
+    , array ==0.5.4.0
     , base >=4.7 && <5
     , containers ==0.6.5.1
     , dead
     , language-c ==0.9.1
     , lens ==5.0.1
     , mtl ==2.2.2
+    , parallel ==3.2.2.0
     , pretty-simple ==4.1.0.0
     , prettyprinter ==1.7.1
     , random ==1.2.1

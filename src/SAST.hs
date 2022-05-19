@@ -46,6 +46,7 @@ data SStatement
   | SBlock [SStatement]
   | SReturn SExpr
   | SIf SExpr SStatement SStatement
+  | SDeclAssign Type Text SExpr
   | SDoWhile SExpr SStatement
   | SWhile SExpr SStatement
   deriving (Show, Eq)
@@ -66,12 +67,17 @@ instance Pretty SFunction where
   pretty (SFunction {sty = fty, sname = n, sformals = sfms, slocals = scls, sbody = _}) =
     pretty fty <+> pretty n <> lparen <> hsep (punctuate comma (map pretty sfms)) <> rparen <+> lbrace <> line <> myindent (vsep (map (\l -> pretty l <> semi) scls)) <> line <> rbrace
 
-data VarTy = Init | Unk | UnInit
+data VarTy = Init | Unk | UnInit deriving (Show, Eq)
 
 data Var (n :: VarTy) where
   Initialised :: Bind -> SExpr -> Var 'Init
   UnInitialised :: Bind -> Var 'UnInit
   Unknown :: Bind -> Var 'Unk
+
+instance Show (Var n) where 
+  show (Initialised b s) = show b ++ " : " ++ show s
+  show (UnInitialised b) = show b 
+  show (Unknown b) = show b 
 
 varName :: Var n -> Text
 varName (Initialised b _) = bindName b
@@ -157,3 +163,4 @@ instance Pretty SStatement where
     "while" <> lparen <> pretty (snd se) <> rparen <> space <> lbrace
       <> myindent (pretty s)
       <> rbrace
+  pretty SDeclAssign{} = undefined

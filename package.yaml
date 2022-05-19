@@ -31,6 +31,9 @@ dependencies:
 - random == 1.2.1
 - lens == 5.0.1
 - prettyprinter == 1.7.1
+- QuickCheck ==2.14.2
+- parallel ==3.2.2.0
+- array == 0.5.4.0
 
 library:
   source-dirs: src

@@ -2,7 +2,7 @@ module Main where
 
 import Text.Pretty.Simple (pPrint)
 import Synth
-import Control.Monad.State.Lazy
+import Control.Monad.State.Strict
 import Control.Monad.Except
 import SAST
 import Prettyprinter
