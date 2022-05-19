@@ -23,7 +23,7 @@ import Control.Lens hiding (index, op)
 import Control.Monad.Except
 import Control.Monad.Random
 import Control.Monad.State.Strict
-import Data.Array.IO hiding (newArray, index)
+import Data.Array.IO hiding (index, newArray)
 import qualified Data.Map.Strict as M
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -278,7 +278,7 @@ tySearch ty e = do
   b <- randElem tys' e
   pure $ S.Unknown b
 
-tySearchStructsDFS :: (MonadError e ProgramGenerator) => A.Type -> [([A.Bind], A.Bind)] -> e -> ProgramGenerator [([A.Bind], A.Bind)]
+tySearchStructsDFS :: (MonadError e ProgramGenerator) => A.Type -> [([A.Bind], A.Bind)] -> e -> ProgramGenerator ([A.Bind], A.Bind)
 tySearchStructsDFS ty bs e = do
   newBS <-
     concat
@@ -295,9 +295,9 @@ tySearchStructsDFS ty bs e = do
         )
         bs
   let shouldRecurse = any (\(_, b) -> A.bindType b /= ty) newBS
-  if shouldRecurse then tySearchStructsDFS ty newBS e else pure newBS
+  if shouldRecurse then tySearchStructsDFS ty newBS e else randElem newBS $ OtherError "tySearchStructsDFS:empty"
 
-tySearchStruct :: (MonadError e ProgramGenerator) => A.Type -> e -> ProgramGenerator [([A.Bind], A.Bind)]
+tySearchStruct :: (MonadError e ProgramGenerator) => A.Type -> e -> ProgramGenerator ([A.Bind], A.Bind)
 tySearchStruct ty e = do
   s <- get
   let tys = map (S.superDowngradeVar . snd) $ M.toList $ s ^. preInitialisedVars
@@ -359,35 +359,41 @@ shuffle xs = do
     newArray :: Int -> [a] -> IO (IOArray Int a)
     newArray n' = newListArray (1, n')
 
-
-runSynthesizers :: [ProgramGenerator a] -> ProgramGenerator a 
-runSynthesizers [] = throwError $ OtherError ""
-runSynthesizers (synth:ss) = do
+runSynthesizers :: (MonadError e ProgramGenerator) => [ProgramGenerator a] -> e -> ProgramGenerator a
+runSynthesizers [] e = throwError e
+runSynthesizers (synth : ss) e = do
   s <- get
-  let eitherOut = runExceptT synth 
+  let eitherOut = runExceptT synth
   (out, s') <- liftIO $ runStateT eitherOut s
-  case out of 
+  case out of
     Right val -> do
       put s'
-      pure val 
-    Left _ -> runSynthesizers ss
+      pure val
+    Left _ -> runSynthesizers ss e
 
-
-synthesizeDeref :: A.Type -> ProgramGenerator S.LValue 
-synthesizeDeref ty = do 
+synthesizeDeref :: A.Type -> ProgramGenerator S.LValue
+synthesizeDeref ty = do
   expr <- synthesizeRestrictedExpression (A.Pointer ty)
   pure $ S.SDeref expr
 
-synthesizeAccess :: A.Type -> ProgramGenerator S.LValue 
-synthesizeAccess ty = do undefined 
+synthesizeAccess :: A.Type -> ProgramGenerator S.LValue
+synthesizeAccess ty = do
+  (path, bind) <- tySearchStruct ty $ OtherError "synthesizeAccess"
+  let accessPath = map A.bindName (path++[bind])
+  pure $ S.SAccess accessPath
 
-synthesizeId :: A.Type -> ProgramGenerator S.LValue 
-synthesizeId ty = do undefined
+synthesizeId :: A.Type -> ProgramGenerator S.LValue
+synthesizeId ty = do
+  v <- tySearch ty $ OtherError "synthesizeId"
+  pure $ S.SId (S.varName v)
 
 synthesizeLVal :: A.Type -> ProgramGenerator S.LValue
-synthesizeLVal ty = do 
-  shuffledActions <- liftIO $ shuffle [synthesizeDeref ty, synthesizeAccess ty, synthesizeId ty]
-  runSynthesizers shuffledActions 
+synthesizeLVal ty = do
+  shuffledActions <- case ty of
+    (A.TyStruct _) -> do liftIO $ shuffle [synthesizeDeref ty, synthesizeAccess ty, synthesizeId ty]
+    _ -> do liftIO $ shuffle [synthesizeDeref ty, synthesizeId ty]
+
+  runSynthesizers shuffledActions $ OtherError "synthesizeLVal"
 
 synthesizeLvalExpr :: A.Type -> ProgramGenerator S.SExpr
 synthesizeLvalExpr ty = do
@@ -436,12 +442,13 @@ synthesizeConstant ty = case ty of
           <$> tySearch ty' (NoVariables "synthesizeConstant:A.Pointer ty'")
       )
       ( \case
-          (NoVariables _) -> if ty' /= A.TyInt then do 
-                              -- cast our NULL pointer to ty
-                              let expr = S.SCast ty (A.TyInt, S.SNull)
-                              pure (ty, expr)
-                            else 
-                                pure (ty, S.SNull)
+          (NoVariables _) ->
+            if ty' /= A.TyInt
+              then do
+                -- cast our NULL pointer to ty
+                let expr = S.SCast ty (A.TyInt, S.SNull)
+                pure (ty, expr)
+              else pure (ty, S.SNull)
           _ -> throwError $ UnknownError "synthesizeConstant"
       )
   A.TyInt -> do
@@ -482,25 +489,45 @@ synthesizeGlobalVariablesInitialised = do
   numGVars <- liftIO randInt
   synthesizeRepeat numGVars synthesizeDefinedGvar
 
+data ROp 
+  = GenAdd 
+  | GenSub 
+  | GenMult 
+  | GenDiv 
+  | GenEqual 
+  | GenNeq 
+  | GenLess 
+  | GenLeq 
+  | GenGreater 
+  | GenGeq
+  | GenAnd 
+  | GenOr 
+  | GenBitAnd 
+  | GenBitOr 
+  deriving (Show, Eq, Bounded, Enum)
+
+randROp :: IO ROp 
+randROp = do 
+  toEnum <$> randIntRange (fromEnum (minBound :: ROp), fromEnum (maxBound :: ROp))
+
 synthesizeOp :: ProgramGenerator A.Op
 synthesizeOp = do
-  opIndex <- liftIO $ randIntRange (0, 13)
-  case opIndex of
-    0 -> pure A.Add
-    1 -> pure A.Sub
-    2 -> pure A.Mult
-    3 -> pure A.Div
-    4 -> pure A.Equal
-    5 -> pure A.Neq
-    6 -> pure A.Less
-    7 -> pure A.Leq
-    8 -> pure A.Greater
-    9 -> pure A.Geq
-    10 -> pure A.And
-    11 -> pure A.Or
-    12 -> pure A.BitAnd
-    13 -> pure A.BitOr
-    _ -> throwError $ InvalidIndex "synthesizeExpression:opIndex"
+  op <- liftIO randROp
+  case op of
+    GenAdd -> pure A.Add
+    GenSub -> pure A.Sub
+    GenMult -> pure A.Mult
+    GenDiv -> pure A.Div
+    GenEqual -> pure A.Equal
+    GenNeq -> pure A.Neq
+    GenLess -> pure A.Less
+    GenLeq -> pure A.Leq
+    GenGreater -> pure A.Greater
+    GenGeq -> pure A.Geq
+    GenAnd -> pure A.And
+    GenOr -> pure A.Or
+    GenBitAnd -> pure A.BitAnd
+    GenBitOr -> pure A.BitOr
 
 synthesizeUOp :: ProgramGenerator A.Uop
 synthesizeUOp = do

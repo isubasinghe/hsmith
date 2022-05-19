@@ -37,7 +37,7 @@ data SExpr'
 
 data LValue
   = SDeref SExpr -- deref an expression
-  | SAccess LValue Text -- access a struct member
+  | SAccess [Text]
   | SId Text
   deriving (Show, Eq)
 
@@ -140,7 +140,6 @@ instance Pretty SExpr' where
 
 instance Pretty LValue where
   pretty (SDeref s) = "*" <> pretty (snd s)
-  pretty (SAccess lval val) = pretty lval <> "[" <> pretty val <> "]"
   pretty (SId ident) = pretty ident
 
 instance Pretty SStatement where
