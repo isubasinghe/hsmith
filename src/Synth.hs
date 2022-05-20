@@ -60,11 +60,15 @@ data ProgramState = ProgramState
     _initialisedVars :: M.Map Text (S.Var 'S.Unk),
     _structs :: M.Map Text A.Struct,
     _statements :: [S.SStatement], -- only valid when generating functions
-    _contextIndent :: Int
+    _contextIndent :: Int, 
+    _statementDepth :: Int
   }
   deriving (Show)
 
 makeLenses ''ProgramState
+
+maxStatementDepth :: Int 
+maxStatementDepth = 4
 
 incrementContextIndent :: ProgramState -> ProgramState
 incrementContextIndent = over contextIndent (+ 1)
@@ -81,7 +85,8 @@ emptyProgramState =
       _initialisedVars = M.empty,
       _structs = M.empty,
       _statements = [],
-      _contextIndent = 0
+      _contextIndent = 0, 
+      _statementDepth = 0
     }
 
 -- random Integer between characters
@@ -648,6 +653,7 @@ synthesizeStatement ty = do
 
 synthesizeStatements :: A.Type -> ProgramGenerator [S.SStatement]
 synthesizeStatements ty = do
+  liftIO $ putStrLn "synthesizeStatements"
   num <- liftIO randInt
   synthesizeRepeat num (synthesizeStatement ty)
 
@@ -660,6 +666,7 @@ withVariables vs fn = do
 
 synthesizeFunction :: ProgramGenerator S.SFunction
 synthesizeFunction = do
+  liftIO $ putStrLn "synthesizeFunction\n\n\n\n"
   ty <- randType False False False
   ident <- liftIO randIdent
   formals <- map S.UnInitialised <$> synthesizeFields

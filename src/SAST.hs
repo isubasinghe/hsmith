@@ -140,6 +140,7 @@ instance Pretty SExpr' where
 
 instance Pretty LValue where
   pretty (SDeref s) = "*" <> pretty (snd s)
+  pretty (SAccess bs) = hcat $ punctuate "." (map pretty bs)
   pretty (SId ident) = pretty ident
 
 instance Pretty SStatement where
