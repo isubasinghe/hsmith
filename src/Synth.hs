@@ -60,21 +60,38 @@ data ProgramState = ProgramState
     _initialisedVars :: M.Map Text (S.Var 'S.Unk),
     _structs :: M.Map Text A.Struct,
     _statements :: [S.SStatement], -- only valid when generating functions
-    _contextIndent :: Int, 
-    _statementDepth :: Int
+    _contextIndent :: Int,
+    _statementDepth :: Int,
+    _expressionDepth :: Int
   }
   deriving (Show)
 
 makeLenses ''ProgramState
 
-maxStatementDepth :: Int 
+maxStatementDepth :: Int
 maxStatementDepth = 4
+
+maxExpressionDepth :: Int
+maxExpressionDepth = 5
 
 incrementContextIndent :: ProgramState -> ProgramState
 incrementContextIndent = over contextIndent (+ 1)
 
 decrementContextIndent :: ProgramState -> ProgramState
 decrementContextIndent = over contextIndent (\s -> s - 1)
+
+incrementStatementDepth :: ProgramState -> ProgramState
+incrementStatementDepth = over statementDepth (+ 1)
+
+decrementStatementDepth :: ProgramState -> ProgramState
+-- it should never be the case where we decrement when its already zero but just in case
+decrementStatementDepth = over statementDepth (\d -> if d <= 0 then 0 else d - 1)
+
+incrementExpressionDepth :: ProgramState -> ProgramState
+incrementExpressionDepth = over expressionDepth (+ 1)
+
+decrementExpressionDepth :: ProgramState -> ProgramState
+decrementExpressionDepth = over expressionDepth (\d -> if d <= 0 then 0 else d - 1)
 
 emptyProgramState :: ProgramState
 emptyProgramState =
@@ -85,8 +102,9 @@ emptyProgramState =
       _initialisedVars = M.empty,
       _structs = M.empty,
       _statements = [],
-      _contextIndent = 0, 
-      _statementDepth = 0
+      _contextIndent = 0,
+      _statementDepth = 0,
+      _expressionDepth = 0
     }
 
 -- random Integer between characters
@@ -384,7 +402,7 @@ synthesizeDeref ty = do
 synthesizeAccess :: A.Type -> ProgramGenerator S.LValue
 synthesizeAccess ty = do
   (path, bind) <- tySearchStruct ty $ OtherError "synthesizeAccess"
-  let accessPath = map A.bindName (path++[bind])
+  let accessPath = map A.bindName (path ++ [bind])
   pure $ S.SAccess accessPath
 
 synthesizeId :: A.Type -> ProgramGenerator S.LValue
@@ -419,7 +437,10 @@ synthesizeAddrExpr ty = do
 synthesizeExpression :: ProgramGenerator S.SExpr
 synthesizeExpression = do
   ty <- randType True False False
-  synthesizeRestrictedExpression ty
+  modify incrementExpressionDepth
+  expr <- synthesizeRestrictedExpression ty
+  modify decrementExpressionDepth 
+  pure expr
 
 synthesizeInt32 :: ProgramGenerator Int32
 synthesizeInt32 = liftIO randomIO
@@ -494,25 +515,25 @@ synthesizeGlobalVariablesInitialised = do
   numGVars <- liftIO randInt
   synthesizeRepeat numGVars synthesizeDefinedGvar
 
-data ROp 
-  = GenAdd 
-  | GenSub 
-  | GenMult 
-  | GenDiv 
-  | GenEqual 
-  | GenNeq 
-  | GenLess 
-  | GenLeq 
-  | GenGreater 
+data ROp
+  = GenAdd
+  | GenSub
+  | GenMult
+  | GenDiv
+  | GenEqual
+  | GenNeq
+  | GenLess
+  | GenLeq
+  | GenGreater
   | GenGeq
-  | GenAnd 
-  | GenOr 
-  | GenBitAnd 
-  | GenBitOr 
+  | GenAnd
+  | GenOr
+  | GenBitAnd
+  | GenBitOr
   deriving (Show, Eq, Bounded, Enum)
 
-randROp :: IO ROp 
-randROp = do 
+randROp :: IO ROp
+randROp = do
   toEnum <$> randIntRange (fromEnum (minBound :: ROp), fromEnum (maxBound :: ROp))
 
 synthesizeOp :: ProgramGenerator A.Op
@@ -559,52 +580,61 @@ randRExpr = do
 
 synthesizeRestrictedExpression :: A.Type -> ProgramGenerator S.SExpr
 synthesizeRestrictedExpression ty = do
-  genAction <- liftIO randRExpr
-  case (genAction, ty) of
-    (GenConstant, _) -> do
-      liftIO $ putStrLn "generate constant"
+  modify incrementExpressionDepth
+  s <- get
+  let canDeepen = s ^. expressionDepth < maxExpressionDepth
+  if not canDeepen
+    then do
+      liftIO $ putStrLn "generate constant due to depth limit"
       synthesizeConstant ty
-    (GenBinOp, _) -> do
-      liftIO $ putStrLn "generate binop"
-      lhs <- synthesizeRestrictedExpression ty
-      rhs <- synthesizeRestrictedExpression ty
-      op <- synthesizeOp
-      pure (ty, S.SBinOp op lhs rhs)
-    (GenUOp, A.TyStruct _) -> do
-      -- recurse because we cannot generate uops for structs
-      liftIO $ putStrLn "generate struct recurse"
-      synthesizeRestrictedExpression ty
-    (GenUOp, _) -> do
-      liftIO $ putStrLn "generate uop"
-      op <- synthesizeUOp
-      expr <- synthesizeRestrictedExpression ty
-      pure (ty, S.SUnOp op expr)
-    (GenCall, _) -> do
-      -- call a function
-      liftIO $ putStrLn "generate call"
-      s <- get
-      let fns = filter (\(_, f) -> S.sty f == ty) $ M.toList $ s ^. functions
-      case length fns of
-        0 -> synthesizeRestrictedExpression ty
-        _ -> do
-          fnIndex <- liftIO $ randIntRange (0, length fns)
-          let (fnName, fn) = fns !! fnIndex
-          let sformals = S.sformals fn
-          exprs <- mapM (synthesizeRestrictedExpression . A.bindType) sformals
-          pure (ty, S.SCall fnName exprs)
-    (GenCast, _) -> do
-      liftIO $ putStrLn "generate cast"
-      expr <- synthesizeExpression
-      pure (ty, S.SCast ty expr)
-    (GenLVal, _) -> do
-      liftIO $ putStrLn "generate lvalExpr"
-      synthesizeLvalExpr ty
-    (GenAssign, _) -> do
-      liftIO $ putStrLn "generate assign"
-      synthesizeAssignExpr ty
-    (GenAddr, _) -> do
-      liftIO $ putStrLn "generate addr"
-      synthesizeAddrExpr ty
+    else do
+      genAction <- liftIO randRExpr
+      expr <- case (genAction, ty) of
+        (GenConstant, _) -> do
+          liftIO $ putStrLn "generate constant"
+          synthesizeConstant ty
+        (GenBinOp, _) -> do
+          liftIO $ putStrLn "generate binop"
+          lhs <- synthesizeRestrictedExpression ty
+          rhs <- synthesizeRestrictedExpression ty
+          op <- synthesizeOp
+          pure (ty, S.SBinOp op lhs rhs)
+        (GenUOp, A.TyStruct _) -> do
+          -- recurse because we cannot generate uops for structs
+          liftIO $ putStrLn "generate struct recurse"
+          synthesizeRestrictedExpression ty
+        (GenUOp, _) -> do
+          liftIO $ putStrLn "generate uop"
+          op <- synthesizeUOp
+          expr <- synthesizeRestrictedExpression ty
+          pure (ty, S.SUnOp op expr)
+        (GenCall, _) -> do
+          -- call a function
+          liftIO $ putStrLn "generate call"
+          let fns = filter (\(_, f) -> S.sty f == ty) $ M.toList $ s ^. functions
+          case length fns of
+            0 -> synthesizeRestrictedExpression ty
+            _ -> do
+              fnIndex <- liftIO $ randIntRange (0, length fns)
+              let (fnName, fn) = fns !! fnIndex
+              let sformals = S.sformals fn
+              exprs <- mapM (synthesizeRestrictedExpression . A.bindType) sformals
+              pure (ty, S.SCall fnName exprs)
+        (GenCast, _) -> do
+          liftIO $ putStrLn "generate cast"
+          expr <- synthesizeExpression
+          pure (ty, S.SCast ty expr)
+        (GenLVal, _) -> do
+          liftIO $ putStrLn "generate lvalExpr"
+          synthesizeLvalExpr ty
+        (GenAssign, _) -> do
+          liftIO $ putStrLn "generate assign"
+          synthesizeAssignExpr ty
+        (GenAddr, _) -> do
+          liftIO $ putStrLn "generate addr"
+          synthesizeAddrExpr ty
+      modify decrementExpressionDepth
+      pure expr
 
 data RStatement
   = GenExpr
@@ -653,9 +683,17 @@ synthesizeStatement ty = do
 
 synthesizeStatements :: A.Type -> ProgramGenerator [S.SStatement]
 synthesizeStatements ty = do
-  liftIO $ putStrLn "synthesizeStatements"
-  num <- liftIO randInt
-  synthesizeRepeat num (synthesizeStatement ty)
+  s <- get
+  let depth = s ^. statementDepth
+  if depth >= maxStatementDepth
+    then pure []
+    else do
+      liftIO $ putStrLn "synthesizeStatements"
+      num <- liftIO randInt
+      modify incrementStatementDepth
+      ss <- synthesizeRepeat num (synthesizeStatement ty)
+      modify decrementStatementDepth
+      pure ss
 
 withVariables :: [S.Var 'S.UnInit] -> ProgramGenerator b -> ProgramGenerator b
 withVariables vs fn = do
