@@ -25,9 +25,10 @@ import Control.Monad.Random
 import Control.Monad.State.Strict
 import Data.Array.IO hiding (index, newArray)
 import qualified Data.Map.Strict as M
+import Data.Ratio
 import Data.Text (Text)
 import qualified Data.Text as T
-import Debug.Trace ()
+import Debug.Trace (trace)
 import GHC.Int
 import qualified SAST as S
 
@@ -72,7 +73,7 @@ maxStatementDepth :: Int
 maxStatementDepth = 4
 
 maxExpressionDepth :: Int
-maxExpressionDepth = 5
+maxExpressionDepth = 14
 
 incrementContextIndent :: ProgramState -> ProgramState
 incrementContextIndent = over contextIndent (+ 1)
@@ -109,7 +110,7 @@ emptyProgramState =
 
 -- random Integer between characters
 randInt :: IO Int
-randInt = getStdRandom $ randomR (1, 10)
+randInt = getStdRandom $ randomR (1, 3)
 
 randIntRange :: (Int, Int) -> IO Int
 randIntRange rng = getStdRandom $ randomR rng
@@ -439,7 +440,7 @@ synthesizeExpression = do
   ty <- randType True False False
   modify incrementExpressionDepth
   expr <- synthesizeRestrictedExpression ty
-  modify decrementExpressionDepth 
+  modify decrementExpressionDepth
   pure expr
 
 synthesizeInt32 :: ProgramGenerator Int32
@@ -582,35 +583,33 @@ synthesizeRestrictedExpression :: A.Type -> ProgramGenerator S.SExpr
 synthesizeRestrictedExpression ty = do
   modify incrementExpressionDepth
   s <- get
-  let canDeepen = s ^. expressionDepth < maxExpressionDepth
+  let canDeepen = (s ^. expressionDepth) < maxExpressionDepth
   if not canDeepen
     then do
-      liftIO $ putStrLn "generate constant due to depth limit"
       synthesizeConstant ty
     else do
       genAction <- liftIO randRExpr
       expr <- case (genAction, ty) of
         (GenConstant, _) -> do
-          liftIO $ putStrLn "generate constant"
+          -- liftIO $ putStrLn "generate constant"
           synthesizeConstant ty
         (GenBinOp, _) -> do
-          liftIO $ putStrLn "generate binop"
+          -- liftIO $ putStrLn "generate binop"
           lhs <- synthesizeRestrictedExpression ty
           rhs <- synthesizeRestrictedExpression ty
           op <- synthesizeOp
           pure (ty, S.SBinOp op lhs rhs)
         (GenUOp, A.TyStruct _) -> do
           -- recurse because we cannot generate uops for structs
-          liftIO $ putStrLn "generate struct recurse"
+          -- liftIO $ putStrLn "generate struct recurse"
           synthesizeRestrictedExpression ty
         (GenUOp, _) -> do
-          liftIO $ putStrLn "generate uop"
+          -- liftIO $ putStrLn "generate uop"
           op <- synthesizeUOp
           expr <- synthesizeRestrictedExpression ty
           pure (ty, S.SUnOp op expr)
         (GenCall, _) -> do
           -- call a function
-          liftIO $ putStrLn "generate call"
           let fns = filter (\(_, f) -> S.sty f == ty) $ M.toList $ s ^. functions
           case length fns of
             0 -> synthesizeRestrictedExpression ty
@@ -621,17 +620,17 @@ synthesizeRestrictedExpression ty = do
               exprs <- mapM (synthesizeRestrictedExpression . A.bindType) sformals
               pure (ty, S.SCall fnName exprs)
         (GenCast, _) -> do
-          liftIO $ putStrLn "generate cast"
+          -- liftIO $ putStrLn "generate cast"
           expr <- synthesizeExpression
           pure (ty, S.SCast ty expr)
         (GenLVal, _) -> do
-          liftIO $ putStrLn "generate lvalExpr"
+          -- liftIO $ putStrLn "generate lvalExpr"
           synthesizeLvalExpr ty
         (GenAssign, _) -> do
-          liftIO $ putStrLn "generate assign"
+          -- liftIO $ putStrLn "generate assign"
           synthesizeAssignExpr ty
         (GenAddr, _) -> do
-          liftIO $ putStrLn "generate addr"
+          -- liftIO $ putStrLn "generate addr"
           synthesizeAddrExpr ty
       modify decrementExpressionDepth
       pure expr
@@ -645,36 +644,42 @@ data RStatement
   | GenWhile
   deriving (Show, Eq, Bounded, Enum)
 
+randomBiasedRStatement :: IO RStatement
+randomBiasedRStatement = do
+  fromList [(GenExpr, 82 % 100), (GenBlock, 1 % 100), (GenReturn, 4 % 100), (GenIf, 7 % 100), (GenDoWhile, 1 % 100), (GenWhile, 4 % 100)]
+
 randomRStatement :: IO RStatement
 randomRStatement = do
   toEnum <$> randIntRange (fromEnum (minBound :: RStatement), fromEnum (maxBound :: RStatement))
 
 synthesizeStatement :: A.Type -> ProgramGenerator S.SStatement
 synthesizeStatement ty = do
-  genAction <- liftIO randomRStatement
+  genAction <- liftIO randomBiasedRStatement
   s <- case genAction of
     GenExpr -> do
-      liftIO $ putStrLn "generate S.SExpr"
+      -- liftIO $ putStrLn "generate S.SExpr"
       S.SExpr <$> synthesizeExpression
-    GenBlock -> do
-      liftIO $ putStrLn "generate S.SBlock"
-      S.SBlock <$> synthesizeStatements ty
+    GenBlock -> do S.SBlock <$> synthesizeStatements ty
     GenReturn -> do
-      liftIO $ putStrLn "generate S.SReturn"
-      S.SReturn <$> synthesizeRestrictedExpression ty
+      if ty == A.TyVoid
+        then do
+          pure $ S.SReturn (A.TyVoid, S.SNoExpr)
+        else do
+          -- liftIO $ putStrLn "generate S.SReturn"
+          S.SReturn <$> synthesizeRestrictedExpression ty
     GenIf -> do
-      liftIO $ putStrLn "generate S.SIf"
+      -- liftIO $ putStrLn "generate S.SIf"
       expr <- synthesizeRestrictedExpression A.TyBool
       b1 <- synthesizeStatements ty
       b2 <- synthesizeStatements ty
       pure $ S.SIf expr (S.SBlock b1) (S.SBlock b2)
     GenDoWhile -> do
-      liftIO $ putStrLn "generate S.SDoWhile"
+      -- liftIO $ putStrLn "generate S.SDoWhile"
       expr <- synthesizeRestrictedExpression A.TyBool
       ss <- synthesizeStatements ty
       pure $ S.SDoWhile expr (S.SBlock ss)
     GenWhile -> do
-      liftIO $ putStrLn "generate S.SWhile"
+      -- liftIO $ putStrLn "generate S.SWhile"
       expr <- synthesizeRestrictedExpression A.TyBool
       ss <- synthesizeStatements ty
       pure $ S.SWhile expr (S.SBlock ss)
@@ -688,7 +693,7 @@ synthesizeStatements ty = do
   if depth >= maxStatementDepth
     then pure []
     else do
-      liftIO $ putStrLn "synthesizeStatements"
+      -- liftIO $ putStrLn "synthesizeStatements"
       num <- liftIO randInt
       modify incrementStatementDepth
       ss <- synthesizeRepeat num (synthesizeStatement ty)
@@ -704,7 +709,7 @@ withVariables vs fn = do
 
 synthesizeFunction :: ProgramGenerator S.SFunction
 synthesizeFunction = do
-  liftIO $ putStrLn "synthesizeFunction\n\n\n\n"
+  -- liftIO $ putStrLn "synthesizeFunction\n\n\n\n"
   ty <- randType False False False
   ident <- liftIO randIdent
   formals <- map S.UnInitialised <$> synthesizeFields

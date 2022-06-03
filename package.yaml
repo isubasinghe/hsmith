@@ -34,7 +34,9 @@ dependencies:
 - QuickCheck ==2.14.2
 - parallel ==3.2.2.0
 - array == 0.5.4.0
-
+- pretty-simple ==4.1.0.0
+- statistics == 0.16.1.0
+- MonadRandom ==0.5.3
 library:
   source-dirs: src
 

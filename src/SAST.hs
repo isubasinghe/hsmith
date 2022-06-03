@@ -33,7 +33,12 @@ data SExpr'
   | SAssign LValue SExpr
   | SAddr LValue
   | SSizeof Type
+  | SNoExpr
   deriving (Show, Eq)
+
+exampleSExpr' = SLiteral 2
+
+exampleSExpr = (TyInt, exampleSExpr')
 
 data LValue
   = SDeref SExpr -- deref an expression
@@ -51,6 +56,33 @@ data SStatement
   | SWhile SExpr SStatement
   deriving (Show, Eq)
 
+exampleSExprBool :: SExpr
+exampleSExprBool = (TyBool, (SBinOp Less (TyInt, (SLiteral 2)) (TyInt, (SLiteral 3))))
+
+exampleStatement1 =
+  SBlock
+    [ SExpr exampleSExprBool,
+      SWhile exampleSExprBool (SBlock [])
+    ]
+
+exampleStatement2 =
+  SBlock
+    [ SExpr exampleSExprBool,
+      SReturn (TyInt, SLiteral 0)
+    ]
+
+exampleIf = SIf exampleSExprBool exampleStatement1 exampleStatement2
+
+exampleDecl = SDeclAssign TyInt "variable" exampleSExpr
+
+exampleStatements =
+  SBlock
+    [ SExpr exampleSExpr,
+      exampleIf,
+      exampleDecl,
+      SWhile exampleSExprBool (SBlock [])
+    ]
+
 data SFunction = SFunction
   { sty :: Type,
     sname :: Text,
@@ -60,12 +92,22 @@ data SFunction = SFunction
   }
   deriving (Show, Eq)
 
+exampleFormals = [Bind {bindName="argc", bindType=TyInt}, Bind{bindName="argv", bindType=Pointer (Pointer TyChar)} ]
+
+exampleFunction = SFunction {sty = TyInt, sname ="main", sformals=exampleFormals, slocals=[], sbody=exampleStatements}
+
 prettyStatements :: [SStatement] -> Doc ann
 prettyStatements ss = vsep (map (\s -> pretty s <> semi) ss)
 
 instance Pretty SFunction where
-  pretty (SFunction {sty = fty, sname = n, sformals = sfms, slocals = scls, sbody = _}) =
-    pretty fty <+> pretty n <> lparen <> hsep (punctuate comma (map pretty sfms)) <> rparen <+> lbrace <> line <> myindent (vsep (map (\l -> pretty l <> semi) scls)) <> line <> rbrace
+  pretty (SFunction {sty = fty, sname = n, sformals = sfms, slocals = scls, sbody = stmts}) =
+    pretty fty <+> pretty n <> lparen <> hsep (punctuate comma (map pretty sfms)) <> rparen <> hardline <> lbrace
+      <> hardline 
+      <> myindent (vsep (map (\l -> pretty l <> semi) scls))
+      <> line
+      <> myindent (pretty stmts)
+      <> line 
+      <> rbrace
 
 data VarTy = Init | Unk | UnInit deriving (Show, Eq)
 
@@ -74,10 +116,10 @@ data Var (n :: VarTy) where
   UnInitialised :: Bind -> Var 'UnInit
   Unknown :: Bind -> Var 'Unk
 
-instance Show (Var n) where 
+instance Show (Var n) where
   show (Initialised b s) = show b ++ " : " ++ show s
-  show (UnInitialised b) = show b 
-  show (Unknown b) = show b 
+  show (UnInitialised b) = show b
+  show (Unknown b) = show b
 
 varName :: Var n -> Text
 varName (Initialised b _) = bindName b
@@ -97,14 +139,17 @@ superDowngradeVar (Initialised b _) = b
 superDowngradeVar (UnInitialised b) = b
 superDowngradeVar (Unknown b) = b
 
-data SProgram = SProgram [Struct] [Var 'UnInit] [Var 'Init] [SFunction]
+data SProgram = SProgram [Struct] [Var 'UnInit] [Var 'Init] [SFunction] deriving (Show)
+
+
+exampleProgram = SProgram [] [] [] [exampleFunction]
 
 instance Pretty SProgram where
   pretty (SProgram ss bs gs fs) =
     "#include <stdio.h>" <> line <> "#include <stdlib.h>" <> line <> "#undef NULL" <> line <> "#define NULL ((int*)0)" <> line
       <> vsep (punctuate line [vsep (punctuate line (map pretty ss)), mapPrinter bs, mapPrinter gs, vsep (punctuate line (map pretty fs))])
-      where 
-        mapPrinter vs = vsep (punctuate line (map (\v -> pretty v <> semi) vs))
+    where
+      mapPrinter vs = vsep (punctuate line (map (\v -> pretty v <> semi) vs))
 
 type Name = Text
 
@@ -137,6 +182,7 @@ instance Pretty SExpr' where
   pretty (SAddr lval) = "&" <> pretty lval
   pretty (SSizeof ty) = parens "sizeof" <> pretty ty
   pretty (SStructLit _ ss) = lbrace <> myindent (vsep (punctuate comma (map (pretty . snd) ss))) <> rbrace
+  pretty SNoExpr = mempty
 
 instance Pretty LValue where
   pretty (SDeref s) = "*" <> pretty (snd s)
@@ -145,22 +191,17 @@ instance Pretty LValue where
 
 instance Pretty SStatement where
   pretty (SExpr s) = pretty (snd s) <> ";"
-  pretty (SBlock ss) = lbrace <> myindent (vsep [pretty s <> semi | s <- ss]) <> rbrace
+  pretty (SBlock ss) = lbrace <> hardline <> myindent (vsep [pretty s | s <- ss]) <> hardline <> rbrace 
   pretty (SReturn s) = "return" <+> pretty (snd s) <> semi
   pretty (SIf s s1 s2) =
-    "if" <> lparen <> pretty (snd s) <> rparen <+> lbrace <> hardline
-      <> myindent (pretty s1)
+    "if" <> lparen <> pretty (snd s) <> rparen <> hardline
+      <> pretty s1
       <> hardline
-      <> rbrace
+      <> "else" 
+      <> hardline 
+      <> pretty s2
       <> hardline
-      <> "else" <+> lbrace
-      <> hardline
-      <> myindent (pretty s2)
-      <> hardline
-      <> rbrace
-  pretty (SDoWhile _ _) = undefined
+  pretty (SDoWhile expr body') = "do" <> hardline <> pretty body' <> "while" <> lparen <> pretty (snd expr) <> rparen <> semi
   pretty (SWhile se s) =
-    "while" <> lparen <> pretty (snd se) <> rparen <> space <> lbrace
-      <> myindent (pretty s)
-      <> rbrace
-  pretty SDeclAssign{} = undefined
+    "while" <> lparen <> pretty (snd se) <> rparen <> hardline <> pretty s
+  pretty (SDeclAssign sdaTy sdaName expr) = pretty sdaTy <+> pretty sdaName <+> pretty (snd expr) <> semi

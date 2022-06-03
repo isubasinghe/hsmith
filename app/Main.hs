@@ -15,7 +15,7 @@ main = do
   (out, _) <- runStateT eitherOut emptyProgramState 
   case out of 
     Right program -> do 
-      render $ pretty program 
+      render $ pretty program
     Left e -> print e
   where 
     render = TIO.putStrLn . renderLazy . layoutPretty defaultLayoutOptions

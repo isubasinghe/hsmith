@@ -43,6 +43,7 @@ extra-deps:
 - Stack-0.4.0@sha256:ada69a23ed9bbaf97260397f6b39b7a1f4e22a11bcac3fe2e8f23f1513f59fd8,1092 
 - parsec-3.1.15.0@sha256:a162d4cc8884014ba35192545cad293af0529fe11497aad8834bbaaa3dfffc26,4429
 - text-1.2.5.0
+- statistics-0.16.1.0@sha256:68c719c034370839f7e8846bf2a79cdd5a205590755e2cd7d2f70cbd7e46b736,5618
 # - acme-missiles-0.3
 # - git: https://github.com/commercialhaskell/stack.git
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
