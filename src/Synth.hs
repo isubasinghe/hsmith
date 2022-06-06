@@ -579,8 +579,8 @@ randRExpr :: IO RExpr
 randRExpr = do
   toEnum <$> randIntRange (fromEnum (minBound :: RExpr), fromEnum (maxBound :: RExpr))
 
-synthesizeRestrictedExpression :: A.Type -> ProgramGenerator S.SExpr
-synthesizeRestrictedExpression ty = do
+synthesizeRestrictedExpression :: Int -> Int -> A.Type -> ProgramGenerator S.SExpr
+synthesizeRestrictedExpression depth maxDepth ty = do
   modify incrementExpressionDepth
   s <- get
   let canDeepen = (s ^. expressionDepth) < maxExpressionDepth
@@ -595,18 +595,18 @@ synthesizeRestrictedExpression ty = do
           synthesizeConstant ty
         (GenBinOp, _) -> do
           -- liftIO $ putStrLn "generate binop"
-          lhs <- synthesizeRestrictedExpression ty
-          rhs <- synthesizeRestrictedExpression ty
+          lhs <- synthesizeRestrictedExpression (depth+1) maxDepth ty
+          rhs <- synthesizeRestrictedExpression (depth+1) maxDepth ty
           op <- synthesizeOp
           pure (ty, S.SBinOp op lhs rhs)
         (GenUOp, A.TyStruct _) -> do
           -- recurse because we cannot generate uops for structs
           -- liftIO $ putStrLn "generate struct recurse"
-          synthesizeRestrictedExpression ty
+          synthesizeRestrictedExpression (depth+1) maxDepth ty
         (GenUOp, _) -> do
           -- liftIO $ putStrLn "generate uop"
           op <- synthesizeUOp
-          expr <- synthesizeRestrictedExpression ty
+          expr <- synthesizeRestrictedExpression (depth +1) maxDepth ty
           pure (ty, S.SUnOp op expr)
         (GenCall, _) -> do
           -- call a function
